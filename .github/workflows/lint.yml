@@ -1,0 +1,29 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: "3.11"
+          environment-name: globalsupplywatch
+          activate-environment: globalsupplywatch
+      - name: Install backend
+        shell: bash -el {0}
+        run: pip install -e backend[dev]
+      - name: Ruff
+        shell: bash -el {0}
+        run: ruff check backend/app backend/tests
+      - name: Black check
+        shell: bash -el {0}
+        run: black --check backend/app backend/tests
+      - name: Pytest
+        shell: bash -el {0}
+        run: pytest backend/tests

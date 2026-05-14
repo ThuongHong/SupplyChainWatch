@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Runtime settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    app_env: str = "local"
+    log_level: str = "INFO"
+    database_url: str = (
+        "postgresql+psycopg://globalsupplywatch:globalsupplywatch@postgres:5432/globalsupplywatch"
+    )
+    async_database_url: str | None = None
+    redis_url: str = "redis://redis:6379/0"
+    celery_broker_url: str = "redis://redis:6379/1"
+    celery_result_backend: str = "redis://redis:6379/2"
+
+    aisstream_api_key: str | None = None
+    fred_api_key: str | None = None
+    un_comtrade_api_key: str | None = None
+    world_bank_api_key: str | None = None
+    scraper_user_agent: str = Field(
+        default="GlobalSupplyWatch/0.1 academic project contact@example.com"
+    )
+    dashscope_api_key: SecretStr | None = None
+    dashscope_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    llm_model_fast: str = "qwen3.6-flash"
+    llm_model_fast_fallbacks: str = (
+        "qwen3.5-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash-2026-02-23"
+    )
+    llm_model_reasoning: str = "deepseek-v4-flash"
+    llm_model_reasoning_fallbacks: str = (
+        "qwen3.6-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash,qwen3.5-flash-2026-02-23"
+    )
+    llm_enabled: bool = True
+    llm_timeout_fast: int = 30
+    llm_timeout_reasoning: int = 60
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return cached application settings."""
+    return Settings()
+
+
+def get_async_database_url() -> str:
+    """Return the async SQLAlchemy database URL."""
+    settings = get_settings()
+    return settings.async_database_url or settings.database_url

@@ -1,0 +1,13 @@
+{
+  "headline": "BDI and FBX_GLOBAL moved together across the sample.",
+  "narrative": "The two series show a positive relationship across 90 days. The optimal lag test suggests the strongest alignment occurs near 0 days. This does not establish causation.",
+  "key_findings": [
+    "Raw correlation: 0.82",
+    "Detrended correlation: 0.64",
+    "Optimal lag: 0 days"
+  ],
+  "caveats": [
+    "Correlation does not establish causation.",
+    "Sparse source data can weaken the result."
+  ]
+}

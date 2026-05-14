@@ -1,0 +1,119 @@
+{
+  "info": {
+    "name": "GlobalSupplyWatch Week 2 API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/health"
+      }
+    },
+    {
+      "name": "List Indices",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/indices"
+      }
+    },
+    {
+      "name": "BDI History",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/indices/BDI?from=2026-01-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "BDI Forecast",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/indices/BDI/forecast"
+      }
+    },
+    {
+      "name": "Vessel Snapshot",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/vessels/snapshot?bbox=-180,-90,180,90&limit=500"
+      }
+    },
+    {
+      "name": "Vessel Detail",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/vessels/123456789"
+      }
+    },
+    {
+      "name": "Ports",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/ports"
+      }
+    },
+    {
+      "name": "Current Port Congestion",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/ports/congestion"
+      }
+    },
+    {
+      "name": "Port Timeline",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/ports/1/timeline?days=30"
+      }
+    },
+    {
+      "name": "Chokepoints",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/chokepoints"
+      }
+    },
+    {
+      "name": "Chokepoint Timeline",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/chokepoints/1/timeline?days=30"
+      }
+    },
+    {
+      "name": "Anomalies",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/anomalies?days=30"
+      }
+    },
+    {
+      "name": "Latest Insights",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/insights/latest?limit=10"
+      }
+    },
+    {
+      "name": "Correlations",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/correlations?indices=BDI,FBX_GLOBAL,WCI_GLOBAL&days=180"
+      }
+    },
+    {
+      "name": "Overview Stats",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/stats/overview"
+      }
+    }
+  ]
+}

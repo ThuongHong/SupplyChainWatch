@@ -1,0 +1,1 @@
+"""GlobalSupplyWatch backend package."""
