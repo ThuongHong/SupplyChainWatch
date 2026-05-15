@@ -164,12 +164,15 @@ type FeatureCollection<TFeature extends PointFeature> = {
   features: TFeature[]
 }
 
+type MapMode = 'flat' | 'globe'
+
 interface RealMapProps {
   vessels: Vessel[]
   selectedId: number | null
   onSelect: (id: number | null) => void
   onViewport: (bbox: string) => void
   layers: { vessels: boolean; heatmap: boolean; ports: boolean }
+  mapMode: MapMode
 }
 
 const REAL_MAP_STYLE: maplibregl.StyleSpecification = {
@@ -285,7 +288,36 @@ function mapBoundsToBbox(map: maplibregl.Map): string {
   ].join(',')
 }
 
-const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, onViewport, layers }) => {
+function applyMapMode(map: maplibregl.Map, mapMode: MapMode): void {
+  try {
+    if (mapMode === 'globe') {
+      map.setProjection({ type: 'globe' })
+      map.setSky({
+        'sky-color': '#020617',
+        'horizon-color': '#38BDF8',
+        'fog-color': '#0E1A32',
+        'fog-ground-blend': 0.52,
+        'horizon-fog-blend': 0.2,
+        'sky-horizon-blend': 0.38,
+        'atmosphere-blend': 0.9,
+      })
+      map.easeTo({ pitch: 35, duration: 500 })
+      return
+    }
+    map.setProjection({ type: 'mercator' })
+    map.setSky({
+      'sky-color': '#020617',
+      'horizon-color': '#020617',
+      'fog-color': 'transparent',
+      'atmosphere-blend': 0,
+    })
+    map.easeTo({ pitch: 0, bearing: 0, duration: 500 })
+  } catch (error) {
+    console.warn('Map display mode update failed', error)
+  }
+}
+
+const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, onViewport, layers, mapMode }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const popupRef = useRef<maplibregl.Popup | null>(null)
@@ -431,6 +463,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
           'text-opacity': 1,
         },
       })
+      applyMapMode(map, mapMode)
       setReady(true)
       onViewport(mapBoundsToBbox(map))
     })
@@ -458,6 +491,13 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
       map.off('moveend', handleMoveEnd)
     }
   }, [ready, onViewport])
+
+  useEffect(() => {
+    if (!ready) return
+    const map = mapRef.current
+    if (!map) return
+    applyMapMode(map, mapMode)
+  }, [ready, mapMode])
 
   useEffect(() => {
     if (!ready) return
@@ -723,6 +763,7 @@ const VesselStatsOverlay: React.FC<{ vessels: Vessel[] }> = ({ vessels }) => {
 export const VesselMap: React.FC = () => {
   const [filters, setFilters] = useState<FilterState>({ types: new Set(VESSEL_TYPE_IDS), speedMax: 25, flag: '' })
   const [layers, setLayers] = useState<LayerState>({ vessels: true, heatmap: true, ports: true })
+  const [mapMode, setMapMode] = useState<MapMode>('flat')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [bbox, setBbox] = useState('-180,-90,180,90')
   const updateViewport = useCallback((next: string) => setBbox(prev => prev === next ? prev : next), [])
@@ -770,8 +811,48 @@ export const VesselMap: React.FC = () => {
             {status === 'loading' ? 'Loading AIS' : status === 'error' ? 'API Error' : 'AIS Live'}
           </Badge>
           <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{filtered.length.toLocaleString()} shown</span>
+          <div aria-label="Map display mode" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 7, background: 'rgba(2,6,23,0.42)', border: '1px solid var(--border-subtle)' }}>
+            <button
+              type="button"
+              aria-pressed={mapMode === 'flat'}
+              onClick={() => setMapMode('flat')}
+              title="2D map"
+              style={{
+                border: 0,
+                borderRadius: 5,
+                padding: '3px 8px',
+                minWidth: 30,
+                cursor: 'pointer',
+                background: mapMode === 'flat' ? 'var(--accent)' : 'transparent',
+                color: mapMode === 'flat' ? 'white' : 'var(--text-secondary)',
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              2D
+            </button>
+            <button
+              type="button"
+              aria-pressed={mapMode === 'globe'}
+              onClick={() => setMapMode('globe')}
+              title="3D globe"
+              style={{
+                border: 0,
+                borderRadius: 5,
+                padding: '3px 8px',
+                minWidth: 30,
+                cursor: 'pointer',
+                background: mapMode === 'globe' ? 'var(--accent)' : 'transparent',
+                color: mapMode === 'globe' ? 'white' : 'var(--text-secondary)',
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              3D
+            </button>
+          </div>
         </div>
-        <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} onViewport={updateViewport} layers={layers} />
+        <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} onViewport={updateViewport} layers={layers} mapMode={mapMode} />
         <VesselStatsOverlay vessels={filtered} />
         {vesselQuery.isError && (
           <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>

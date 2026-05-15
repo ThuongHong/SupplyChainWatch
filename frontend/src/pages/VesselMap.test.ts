@@ -18,3 +18,30 @@ describe('VesselMap layer controls', () => {
     expect(source).toMatch(/0\.9,\s*'rgba\(251,146,60,0\.96\)'/)
   })
 })
+
+describe('VesselMap globe mode toggle', () => {
+  it('keeps the original 2D map as the default mode', () => {
+    expect(source).toMatch(/type MapMode = 'flat' \| 'globe'/)
+    expect(source).toMatch(/useState<MapMode>\('flat'\)/)
+  })
+
+  it('passes map mode into the MapLibre map component', () => {
+    expect(source).toMatch(/mapMode:\s*MapMode/)
+    expect(source).toMatch(/<VesselRealMap[^>]*mapMode=\{mapMode\}/s)
+  })
+
+  it('switches MapLibre between mercator and globe projections', () => {
+    expect(source).toMatch(/setProjection\(\{\s*type:\s*'mercator'\s*\}\)/)
+    expect(source).toMatch(/setProjection\(\{\s*type:\s*'globe'\s*\}\)/)
+    expect(source).toMatch(/setSky\(/)
+    expect(source).toMatch(/'atmosphere-blend':\s*0\.9/)
+  })
+
+  it('renders a compact 2D and 3D segmented control', () => {
+    expect(source).toMatch(/aria-label="Map display mode"/)
+    expect(source).toMatch(/aria-pressed=\{mapMode === 'flat'\}/)
+    expect(source).toMatch(/aria-pressed=\{mapMode === 'globe'\}/)
+    expect(source).toMatch(/>\s*2D\s*</)
+    expect(source).toMatch(/>\s*3D\s*</)
+  })
+})
