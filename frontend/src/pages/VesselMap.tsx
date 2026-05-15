@@ -26,16 +26,6 @@ const VESSEL_TYPE_INFO: Record<VesselTypeId, { label: string; color: string; sym
   unknown:   { label: 'Unknown',         color: '#64748B', symbol: '•' },
 }
 
-const LANES: { pts: [number, number][] }[] = [
-  { pts: [[122,31],[160,38],[190,40],[220,36],[240,34]] },
-  { pts: [[104,1],[85,12],[60,22],[44,30],[33,32],[10,48],[0,51]] },
-  { pts: [[55,25],[70,18],[85,12],[104,1]] },
-  { pts: [[0,51],[-15,48],[-40,42],[-70,38],[-78,33]] },
-  { pts: [[-45,-22],[-30,-15],[-15,5],[0,35]] },
-  { pts: [[104,1],[110,-8],[120,-18],[135,-25],[150,-32]] },
-  { pts: [[122,31],[126,34],[130,35],[135,35]] },
-]
-
 const CONTINENTS: [number, number][][] = [
   [[-130,50],[-140,58],[-160,62],[-168,65],[-165,72],[-140,70],[-120,72],[-95,72],[-80,68],[-65,60],[-55,48],[-67,44],[-75,35],[-82,25],[-98,18],[-105,20],[-115,28],[-120,34],[-125,42],[-130,50]],
   [[-98,18],[-95,16],[-88,15],[-84,11],[-80,8],[-78,9],[-82,14],[-85,16],[-90,20],[-98,18]],
@@ -169,13 +159,7 @@ type PointFeature = {
   properties: Record<string, string | number | boolean | null>
 }
 
-type LineFeature = {
-  type: 'Feature'
-  geometry: { type: 'LineString'; coordinates: [number, number][] }
-  properties: Record<string, string | number | boolean | null>
-}
-
-type FeatureCollection<TFeature extends PointFeature | LineFeature> = {
+type FeatureCollection<TFeature extends PointFeature> = {
   type: 'FeatureCollection'
   features: TFeature[]
 }
@@ -185,7 +169,7 @@ interface RealMapProps {
   selectedId: number | null
   onSelect: (id: number | null) => void
   onViewport: (bbox: string) => void
-  layers: { vessels: boolean; heatmap: boolean; ports: boolean; lanes: boolean }
+  layers: { vessels: boolean; heatmap: boolean; ports: boolean }
 }
 
 const REAL_MAP_STYLE: maplibregl.StyleSpecification = {
@@ -238,17 +222,6 @@ function portsToGeoJson(): FeatureCollection<PointFeature> {
         congestion: port.congestion,
         color: port.congestion === 'high' ? '#EF4444' : port.congestion === 'medium' ? '#EAB308' : '#22C55E',
       },
-    })),
-  }
-}
-
-function lanesToGeoJson(): FeatureCollection<LineFeature> {
-  return {
-    type: 'FeatureCollection',
-    features: LANES.map((lane, index) => ({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: lane.pts.map(([lon, lat]) => [normalizeLon(lon), lat]) },
-      properties: { id: index },
     })),
   }
 }
@@ -343,30 +316,6 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
 
     map.on('load', () => {
       addVesselIcons(map)
-      map.addSource('shipping-lanes', { type: 'geojson', data: lanesToGeoJson() })
-      map.addLayer({
-        id: 'shipping-lanes-glow',
-        type: 'line',
-        source: 'shipping-lanes',
-        paint: {
-          'line-color': '#38BDF8',
-          'line-opacity': 0.16,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 1, 1.5, 5, 4],
-          'line-blur': 2,
-        },
-      })
-      map.addLayer({
-        id: 'shipping-lanes',
-        type: 'line',
-        source: 'shipping-lanes',
-        paint: {
-          'line-color': '#93C5FD',
-          'line-opacity': 0.45,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.6, 5, 1.6],
-          'line-dasharray': [2, 2],
-        },
-      })
-
       map.addSource('ports', { type: 'geojson', data: portsToGeoJson() })
       map.addLayer({
         id: 'port-halos',
@@ -415,17 +364,18 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
         source: 'vessel-heat',
         maxzoom: 7,
         paint: {
-          'heatmap-weight': ['interpolate', ['linear'], ['get', 'speed'], 0, 0.2, 25, 1],
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 1, 0.35, 6, 1.5],
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 1, 12, 6, 32],
-          'heatmap-opacity': 0.62,
+          'heatmap-weight': ['interpolate', ['linear'], ['get', 'speed'], 0, 0.35, 25, 1],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 1, 0.85, 6, 2.35],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 1, 18, 6, 46],
+          'heatmap-opacity': 0.86,
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
-            0, 'rgba(14,165,233,0)',
-            0.2, 'rgba(14,165,233,0.35)',
-            0.55, 'rgba(59,130,246,0.62)',
-            0.85, 'rgba(234,179,8,0.78)',
-            1, 'rgba(239,68,68,0.88)',
+            0, 'rgba(45,212,191,0)',
+            0.15, 'rgba(45,212,191,0.5)',
+            0.45, 'rgba(56,189,248,0.76)',
+            0.7, 'rgba(250,204,21,0.9)',
+            0.9, 'rgba(251,146,60,0.96)',
+            1, 'rgba(239,68,68,1)',
           ],
         },
       })
@@ -537,7 +487,6 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
     ;['vessel-halos', 'vessel-type-symbols', ...VESSEL_SYMBOL_LAYERS].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.vessels)))
     ;['vessel-heat'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.heatmap)))
     ;['ports', 'port-halos', 'port-labels'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.ports)))
-    ;['shipping-lanes', 'shipping-lanes-glow'].forEach(id => map.setLayoutProperty(id, 'visibility', visibility(layers.lanes)))
   }, [ready, layers])
 
   useEffect(() => {
@@ -669,7 +618,13 @@ const VesselDrawer: React.FC<{ vessel: Vessel; detail?: VesselDetail; loading?: 
 // ---- Filter Sidebar ----
 
 interface FilterState { types: Set<VesselTypeId>; speedMax: number; flag: string }
-interface LayerState  { vessels: boolean; heatmap: boolean; ports: boolean; lanes: boolean }
+interface LayerState  { vessels: boolean; heatmap: boolean; ports: boolean }
+
+const LAYER_LABELS: Record<keyof LayerState, string> = {
+  vessels: 'Vessels',
+  heatmap: 'Density Heatmap',
+  ports: 'Port Markers',
+}
 
 const FilterSidebar: React.FC<{
   filters: FilterState; onFilters: (f: FilterState) => void
@@ -709,9 +664,17 @@ const FilterSidebar: React.FC<{
       <div>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>Layers</div>
         {(Object.entries(layers) as [keyof LayerState, boolean][]).map(([key, val]) => (
-          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)' }}>
+          <label key={key} style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, cursor: 'pointer', fontSize: 12,
+            color: val ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: val ? 'rgba(56,189,248,0.13)' : 'transparent',
+            border: `1px solid ${val ? 'rgba(56,189,248,0.38)' : 'transparent'}`,
+            borderRadius: 6,
+            padding: '5px 7px',
+            marginInline: -7,
+          }}>
             <input type="checkbox" checked={val} onChange={e => onLayers({ ...layers, [key]: e.target.checked })} style={{ accentColor: 'var(--accent)' }} />
-            {{ vessels: 'Vessels', heatmap: 'Density Heatmap', ports: 'Port Markers', lanes: 'Shipping Lanes' }[key]}
+            {LAYER_LABELS[key]}
           </label>
         ))}
       </div>
@@ -759,7 +722,7 @@ const VesselStatsOverlay: React.FC<{ vessels: Vessel[] }> = ({ vessels }) => {
 
 export const VesselMap: React.FC = () => {
   const [filters, setFilters] = useState<FilterState>({ types: new Set(VESSEL_TYPE_IDS), speedMax: 25, flag: '' })
-  const [layers, setLayers] = useState<LayerState>({ vessels: true, heatmap: false, ports: true, lanes: false })
+  const [layers, setLayers] = useState<LayerState>({ vessels: true, heatmap: true, ports: true })
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [bbox, setBbox] = useState('-180,-90,180,90')
   const updateViewport = useCallback((next: string) => setBbox(prev => prev === next ? prev : next), [])
