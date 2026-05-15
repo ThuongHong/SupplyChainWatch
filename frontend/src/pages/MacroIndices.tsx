@@ -32,6 +32,7 @@ type Period = typeof PERIODS[number]
 type Mode = 'raw' | 'normalized'
 const PERIOD_DAYS: Record<Period, number | null> = { '30D': 30, '90D': 90, '1Y': 365, All: null }
 const COLORS = ['#3B82F6', '#06B6D4', '#A78BFA', '#F59E0B', '#22C55E', '#EF4444', '#EC4899', '#94A3B8']
+const ALLOWED_INDICES = new Set(['DCOILBRENTEU', 'T10Y2Y', 'RSAFS'])
 
 interface IndexMeta extends IndexSummary {
   color: string
@@ -228,7 +229,7 @@ const ForecastPanel: React.FC<{ index: IndexMeta; forecast?: ForecastResponse; i
               const bandPoints = usable.filter(item => item.lower != null && item.upper != null)
               const band = bandPoints.length > 1
                 ? 'M' + bandPoints.map((item, i) => `${toX(i).toFixed(1)},${toY(item.upper ?? 0).toFixed(1)}`).join(' L') +
-                  ' L' + bandPoints.slice().reverse().map((item, i) => `${toX(bandPoints.length - 1 - i).toFixed(1)},${toY(item.lower ?? 0).toFixed(1)}`).join(' L') + ' Z'
+                ' L' + bandPoints.slice().reverse().map((item, i) => `${toX(bandPoints.length - 1 - i).toFixed(1)},${toY(item.lower ?? 0).toFixed(1)}`).join(' L') + ' Z'
                 : ''
               return (
                 <>
