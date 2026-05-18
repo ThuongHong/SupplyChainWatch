@@ -8,9 +8,7 @@ GlobalSupplyWatch monitors global shipping supply chains. Backend runs in Docker
 
 ```bash
 cp .env.example .env        # fill in API keys
-make up                     # start postgres, redis, backend, worker, beat, flower, mailhog
-make migrate                # run alembic migrations
-make seed                   # seed 50 ports + 5 chokepoints
+make up                     
 ```
 
 ### 2. Frontend (local)
