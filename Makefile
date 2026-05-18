@@ -2,6 +2,9 @@
 
 up:
 	docker compose up -d
+	$(MAKE) migrate
+	$(MAKE) seed
+	$(MAKE) collect-all
 
 down:
 	docker compose down
