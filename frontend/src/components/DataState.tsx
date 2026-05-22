@@ -85,13 +85,18 @@ export const DataProvenance: React.FC<{
   timestamp?: string | null
   stale?: boolean
 }> = ({ mode, source, timestamp, stale }) => {
-  const variant = mode === 'live' && !stale ? 'success' : mode === 'demo' ? 'warning' : mode === 'error' ? 'danger' : 'default'
-  const label = mode === 'live' && !stale ? 'Live API'
-    : mode === 'live' && stale ? 'Stale API'
-      : mode === 'demo' ? 'Demo fallback'
-        : mode === 'empty' ? 'No rows'
-          : mode === 'loading' ? 'Loading'
-            : 'API error'
+  const effectiveMode = stale && mode === 'live' ? 'stale' : mode
+  const variant = effectiveMode === 'live' ? 'success'
+    : effectiveMode === 'demo' || effectiveMode === 'stale' ? 'warning'
+      : effectiveMode === 'error' ? 'danger'
+        : 'default'
+  const label = effectiveMode === 'live' ? 'Live API'
+    : effectiveMode === 'stale' ? 'Stale API'
+      : effectiveMode === 'demo' ? 'Demo fallback'
+        : effectiveMode === 'empty' ? 'No rows'
+          : effectiveMode === 'disabled' ? 'Source disabled'
+            : effectiveMode === 'loading' ? 'Loading'
+              : 'API error'
   return (
     <div className="provenance">
       <Badge variant={variant}>{label}</Badge>

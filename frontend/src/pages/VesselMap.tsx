@@ -5,7 +5,15 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { PORT_DATA } from '../components/MiniMap'
 import { Badge } from '../components/Badge'
 import { Icons } from '../components/icons'
-import { apiClient, type VesselDetail, type VesselSnapshotItem } from '../api/client'
+import {
+  apiClient,
+  isApiError,
+  type AnomalyResponse,
+  type VesselDetail,
+  type VesselEtaDriftResponse,
+  type VesselSnapshotItem,
+  type VesselWatchlistResponse,
+} from '../api/client'
 import { queryKeys } from '../api/queries'
 import { EmptyState, ErrorPanel } from '../components/DataState'
 
@@ -133,6 +141,29 @@ function emptyTypeCounts(): Record<VesselTypeId, number> {
     (counts, id) => ({ ...counts, [id]: 0 }),
     {} as Record<VesselTypeId, number>,
   )
+}
+
+type VesselSourceStatus = 'loading' | 'live' | 'empty' | 'disabled' | 'error'
+
+function isDisabledSourceError(error: unknown): boolean {
+  if (!error) return false
+  const detail = isApiError(error) ? error.detail : error instanceof Error ? error.message : String(error)
+  return /disabled|not configured|missing|api key|aisstream/i.test(detail)
+}
+
+function vesselStatusLabel(status: VesselSourceStatus, watchlistCount: number): string {
+  if (status === 'loading') return 'Loading AIS'
+  if (status === 'disabled') return 'AIS Disabled'
+  if (status === 'error') return 'Source Error'
+  if (status === 'empty') return 'Empty AIS'
+  return watchlistCount ? 'Watchlist AIS' : 'Risk-area AIS'
+}
+
+function vesselStatusVariant(status: VesselSourceStatus): 'success' | 'warning' | 'danger' | 'default' {
+  if (status === 'live') return 'success'
+  if (status === 'error') return 'danger'
+  if (status === 'loading' || status === 'disabled') return 'warning'
+  return 'default'
 }
 
 // ---- Symbol Icon ----
@@ -593,15 +624,22 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
 
 // ---- Vessel Drawer ----
 
-const VesselDrawer: React.FC<{ vessel: Vessel; detail?: VesselDetail; loading?: boolean; onClose: () => void }> = ({ vessel, detail, loading, onClose }) => {
+const VesselDrawer: React.FC<{
+  vessel: Vessel
+  detail?: VesselDetail
+  loading?: boolean
+  watchlist?: VesselWatchlistResponse
+  etaDrift?: VesselEtaDriftResponse
+  anomalies?: AnomalyResponse[]
+  onClose: () => void
+}> = ({ vessel, detail, loading, watchlist, etaDrift, anomalies = [], onClose }) => {
   const info = VESSEL_TYPE_INFO[vessel.type]
   const realTrack = detail?.track?.slice().reverse().map(point => ({ x: point.lon, y: point.lat })) ?? []
-  const trackPts = realTrack.length > 1 ? realTrack : Array.from({ length: 14 }, (_, i) => ({
-    x: vessel.lon - (14 - i) * 0.8 + Math.sin(i) * 0.5,
-    y: vessel.lat + (14 - i) * 0.3 * Math.cos(i * 0.7),
-  }))
-  const minX = Math.min(...trackPts.map(p => p.x)), maxX = Math.max(...trackPts.map(p => p.x))
-  const minY = Math.min(...trackPts.map(p => p.y)), maxY = Math.max(...trackPts.map(p => p.y))
+  const trackPts = realTrack.length > 1 ? realTrack : []
+  const minX = trackPts.length ? Math.min(...trackPts.map(p => p.x)) : 0
+  const maxX = trackPts.length ? Math.max(...trackPts.map(p => p.x)) : 1
+  const minY = trackPts.length ? Math.min(...trackPts.map(p => p.y)) : 0
+  const maxY = trackPts.length ? Math.max(...trackPts.map(p => p.y)) : 1
   const rx = maxX - minX || 1, ry = maxY - minY || 1
 
   return (
@@ -634,7 +672,7 @@ const VesselDrawer: React.FC<{ vessel: Vessel; detail?: VesselDetail; loading?: 
         </div>
         <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>7-Day Track</div>
         <div style={{ background: '#060B16', borderRadius: 6, padding: 8 }}>
-          {loading ? <div style={{ height: 90, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading track...</div> : <svg width="100%" viewBox="0 0 250 90" style={{ display: 'block' }}>
+          {loading ? <div style={{ height: 90, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading track...</div> : trackPts.length > 1 ? <svg width="100%" viewBox="0 0 250 90" style={{ display: 'block' }}>
             <polyline
               points={trackPts.map(pt => `${10 + ((pt.x - minX) / rx) * 230},${10 + (1 - (pt.y - minY) / ry) * 70}`).join(' ')}
               fill="none" stroke={info.color} strokeWidth="1.5" strokeLinejoin="round" opacity="0.8"
@@ -645,10 +683,31 @@ const VesselDrawer: React.FC<{ vessel: Vessel; detail?: VesselDetail; loading?: 
               return <circle key={i} cx={x} cy={y} r={i === trackPts.length - 1 ? 3.5 : 1.5}
                 fill={i === trackPts.length - 1 ? info.color : info.color + '80'} />
             })}
-          </svg>}
+          </svg> : <EmptyState title="No AIS track rows" detail="Track appears after selective AIS collection stores positions for this vessel." compact />}
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-          {realTrack.length > 1 ? `${realTrack.length} API track points` : 'Fallback track shown because no detail track was returned.'}
+          {realTrack.length > 1 ? `${realTrack.length} API track points` : 'No detail track returned by API.'}
+        </div>
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>Operational Context</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
+            <div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>Watchlist reason</div>
+              <div style={{ color: 'var(--text-primary)' }}>{watchlist?.reason ?? 'Selected AIS vessel'}</div>
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>ETA drift</div>
+              <div className="mono-num" style={{ color: etaDrift?.eta_drift_minutes ? 'var(--warning)' : 'var(--text-primary)' }}>
+                {etaDrift?.eta_drift_minutes == null ? 'No drift estimate' : `${etaDrift.eta_drift_minutes} min · ${Math.round(etaDrift.confidence * 100)}%`}
+              </div>
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>Anomaly markers</div>
+              <div style={{ color: anomalies.length ? 'var(--danger)' : 'var(--text-primary)' }}>
+                {anomalies.length ? `${anomalies.length} active vessel anomalies` : 'No active anomaly context'}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -773,7 +832,19 @@ export const VesselMap: React.FC = () => {
     queryFn: ({ signal }) => apiClient.vesselSnapshot({ bbox, limit: 5000 }, { signal }),
     refetchInterval: 60_000,
   })
-  const vessels = useMemo(() => (vesselQuery.data ?? []).map(mapApiVessel), [vesselQuery.data])
+  const watchlistQuery = useQuery({
+    queryKey: queryKeys.vesselWatchlist,
+    queryFn: ({ signal }) => apiClient.vesselWatchlist({ signal }),
+    refetchInterval: 60_000,
+  })
+  const watchlistMmsi = useMemo(
+    () => new Set((watchlistQuery.data ?? []).map(item => item.mmsi)),
+    [watchlistQuery.data],
+  )
+  const vessels = useMemo(() => {
+    const mapped = (vesselQuery.data ?? []).map(mapApiVessel)
+    return watchlistMmsi.size ? mapped.filter(vessel => watchlistMmsi.has(Number(vessel.mmsi))) : mapped
+  }, [vesselQuery.data, watchlistMmsi])
 
   const typeCounts = useMemo(() => {
     const counts = emptyTypeCounts()
@@ -791,14 +862,41 @@ export const VesselMap: React.FC = () => {
   ), [filters, vessels])
 
   const selectedVessel = selectedId !== null ? vessels.find(v => v.id === selectedId) ?? null : null
+  const selectedWatchlist = selectedId !== null
+    ? (watchlistQuery.data ?? []).find(item => item.mmsi === selectedId)
+    : undefined
   const detailQuery = useQuery({
-    queryKey: selectedId !== null ? queryKeys.vesselDetail(selectedId) : ['vessels', 'no-selection'],
-    queryFn: ({ signal }) => apiClient.vesselDetail(selectedId!, { signal }),
+    queryKey: selectedId !== null
+      ? (selectedWatchlist ? queryKeys.watchedVesselPositions(selectedId) : queryKeys.vesselDetail(selectedId))
+      : ['vessels', 'no-selection'],
+    queryFn: async ({ signal }) => {
+      if (selectedWatchlist) {
+        const track = await apiClient.watchedVesselPositions(selectedId!, 200, { signal })
+        return { vessel: null, track }
+      }
+      return apiClient.vesselDetail(selectedId!, { signal })
+    },
+    enabled: selectedId !== null,
+    retry: false,
+  })
+  const anomalyQuery = useQuery({
+    queryKey: selectedId !== null ? queryKeys.watchedVesselAnomalies(selectedId) : ['risk', 'watchlist', 'no-selection', 'anomalies'],
+    queryFn: ({ signal }) => apiClient.watchedVesselAnomalies(selectedId!, { signal }),
+    enabled: selectedId !== null,
+    retry: false,
+  })
+  const etaDriftQuery = useQuery({
+    queryKey: selectedId !== null ? queryKeys.watchedVesselEtaDrift(selectedId) : ['risk', 'watchlist', 'no-selection', 'eta-drift'],
+    queryFn: ({ signal }) => apiClient.watchedVesselEtaDrift(selectedId!, { signal }),
     enabled: selectedId !== null,
     retry: false,
   })
 
-  const status: 'loading' | 'live' | 'error' = vesselQuery.isLoading ? 'loading' : vesselQuery.isError ? 'error' : 'live'
+  const sourceError = vesselQuery.error ?? watchlistQuery.error
+  const status: VesselSourceStatus = vesselQuery.isLoading || watchlistQuery.isLoading ? 'loading'
+    : sourceError ? isDisabledSourceError(sourceError) ? 'disabled' : 'error'
+      : vessels.length === 0 ? 'empty'
+        : 'live'
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
@@ -806,11 +904,9 @@ export const VesselMap: React.FC = () => {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0 }}>
         <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 8, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 10, boxShadow: 'var(--shadow-md)', zIndex: 5 }}>
           <Icons.Globe size={14} style={{ color: 'var(--accent)' } as React.CSSProperties} />
-          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>GlobalSupplyWatch · Live Vessel Tracking</span>
-          <Badge variant={status === 'error' ? 'danger' : status === 'loading' ? 'warning' : 'success'}>
-            {status === 'loading' ? 'Loading AIS' : status === 'error' ? 'API Error' : 'AIS Live'}
-          </Badge>
-          <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{filtered.length.toLocaleString()} shown</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>GlobalSupplyWatch · Selective Vessel Drilldown</span>
+          <Badge variant={vesselStatusVariant(status)}>{vesselStatusLabel(status, watchlistMmsi.size)}</Badge>
+          <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{filtered.length.toLocaleString()} shown · {watchlistMmsi.size} watchlist</span>
           <div aria-label="Map display mode" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 7, background: 'rgba(2,6,23,0.42)', border: '1px solid var(--border-subtle)' }}>
             <button
               type="button"
@@ -854,17 +950,32 @@ export const VesselMap: React.FC = () => {
         </div>
         <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} onViewport={updateViewport} layers={layers} mapMode={mapMode} />
         <VesselStatsOverlay vessels={filtered} />
-        {vesselQuery.isError && (
+        {sourceError && status !== 'disabled' && (
           <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>
-            <ErrorPanel error={vesselQuery.error} title="Vessel snapshot unavailable" compact />
+            <ErrorPanel error={sourceError} title="Vessel AIS source unavailable" compact />
           </div>
         )}
-        {!vesselQuery.isLoading && !vesselQuery.isError && vessels.length === 0 && (
+        {status === 'disabled' && (
           <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>
-            <EmptyState title="No vessels in this viewport" detail="Pan or zoom out, or run AIS collectors before the demo." compact />
+            <EmptyState title="AIS source disabled" detail="Configure AISStream credentials and run selective collection to populate watchlist vessel rows." compact />
           </div>
         )}
-        {selectedVessel && <VesselDrawer vessel={selectedVessel} detail={detailQuery.data} loading={detailQuery.isLoading} onClose={() => setSelectedId(null)} />}
+        {status === 'empty' && (
+          <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>
+            <EmptyState title="No watchlist AIS rows in this viewport" detail="Normal mode does not render demo vessels; refresh watchlist rules, run AIS collectors, or zoom out." compact />
+          </div>
+        )}
+        {selectedVessel && (
+          <VesselDrawer
+            vessel={selectedVessel}
+            detail={detailQuery.data}
+            loading={detailQuery.isLoading}
+            watchlist={selectedWatchlist}
+            etaDrift={etaDriftQuery.data}
+            anomalies={anomalyQuery.data}
+            onClose={() => setSelectedId(null)}
+          />
+        )}
       </div>
     </div>
   )

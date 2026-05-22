@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
+from app.collectors.portwatch import demo_portwatch_rows
 from app.db.session import SessionLocal
 
 PORTS = [
@@ -23,6 +24,8 @@ CHOKEPOINTS = [
     ("Strait of Hormuz", "POLYGON((55.5 25.3,57.3 25.3,57.3 27.0,55.5 27.0,55.5 25.3))"),
     ("Strait of Malacca", "POLYGON((99.0 1.0,104.0 1.0,104.0 6.5,99.0 6.5,99.0 1.0))"),
     ("Bab-el-Mandeb", "POLYGON((42.5 12.2,44.0 12.2,44.0 13.5,42.5 13.5,42.5 12.2))"),
+    ("Red Sea", "POLYGON((32.0 12.0,44.0 12.0,44.0 30.0,32.0 30.0,32.0 12.0))"),
+    ("Black Sea", "POLYGON((27.0 40.0,42.0 40.0,42.0 47.5,27.0 47.5,27.0 40.0))"),
 ]
 
 
@@ -65,6 +68,28 @@ def main() -> None:
                     WHERE NOT EXISTS (SELECT 1 FROM chokepoints WHERE name = :name)
                     """),
                 {"name": name, "wkt": wkt},
+            )
+        for row in demo_portwatch_rows():
+            db.execute(
+                text("""
+                    INSERT INTO portwatch_metrics (
+                        observed_at, entity_type, entity_id, entity_name,
+                        metric_name, metric_value, unit, source, source_entity_id, metadata
+                    )
+                    SELECT :observed_at, :entity_type, :entity_id, :entity_name,
+                           :metric_name, :metric_value, :unit, :source, :source_entity_id,
+                           CAST(:metadata AS JSONB)
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM portwatch_metrics
+                        WHERE entity_id = :entity_id
+                          AND metric_name = :metric_name
+                          AND source = :source
+                    )
+                    """),
+                {
+                    **row,
+                    "metadata": "{}",
+                },
             )
         db.commit()
 

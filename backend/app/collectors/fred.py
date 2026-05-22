@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.schemas.records import FreightIndexRecord
 
 FRED_SERIES = {
+    "BDI": "BDIY",
     "DCOILBRENTEU": "DCOILBRENTEU",
     "DTWEXBGS": "DTWEXBGS",
     "INDPRO": "INDPRO",
@@ -61,7 +62,7 @@ class FREDCollector(BaseCollector[FreightIndexRecord]):
                         "index_name": index_name,
                         "value": float(value),
                         "source": self.source,
-                        "metadata": {"series_id": series_id},
+                        "metadata": {"provider": "FRED", "series_id": series_id},
                     }
                 )
         return rows

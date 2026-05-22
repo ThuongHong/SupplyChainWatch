@@ -5,6 +5,11 @@ import pytest
 from app.analysis.anomaly import rolling_z_score, severity_from_z_score
 from app.analysis.correlation import correlation_matrix, pearson_correlation
 from app.analysis.forecast import _moving_average
+from app.analysis.maritime_risk import (
+    economic_pressure_context,
+    score_components,
+    weather_route_impact,
+)
 
 
 def test_pearson_correlation_detects_linear_relationship() -> None:
@@ -42,3 +47,36 @@ def test_severity_mapping() -> None:
 
 def test_moving_average_uses_recent_window() -> None:
     assert _moving_average([1, 2, 3, 10, 20], window=2) == pytest.approx(15)
+
+
+def test_portwatch_score_components_include_missing_metadata() -> None:
+    components, missing, reasons = score_components(
+        {"daily_vessel_calls": 120.0, "trade_volume_index": 65.0},
+        entity_type="port",
+        baselines={"daily_vessel_calls": 80.0, "trade_volume_index": 100.0},
+    )
+
+    assert components["traffic_anomaly"] == pytest.approx(100.0)
+    assert "bottleneck_stress" in missing
+    assert reasons
+
+
+def test_portwatch_score_components_use_absolute_values_without_baseline() -> None:
+    components, missing, reasons = score_components(
+        {"daily_vessel_calls": 120.0, "trade_volume_index": 65.0},
+        entity_type="port",
+    )
+
+    assert components["traffic_anomaly"] == pytest.approx(60.0)
+    assert components["trade_flow_change"] == pytest.approx(65.0)
+    assert components["derived_congestion_risk"] == pytest.approx(60.0)
+    assert "bottleneck_stress" in missing
+    assert reasons
+
+
+def test_weather_and_economic_context_scores() -> None:
+    weather = weather_route_impact(wave_m=3.0, wind_kph=40.0)
+    economic = economic_pressure_context({"FBX": 6.0, "WCI": -4.0})
+
+    assert weather["score"] == pytest.approx(50.0)
+    assert economic["severity"] in {"medium", "high"}

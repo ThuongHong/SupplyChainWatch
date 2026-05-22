@@ -124,6 +124,76 @@ class InsightResponse(BaseModel):
     narrative_generated_at: datetime | None = None
     metrics: dict[str, Any] | None = None
     priority: int = 0
+    event_type: str | None = None
+    confidence: float | None = None
+    affected_entities: list[dict[str, Any]] | None = None
+    source_metrics: dict[str, Any] | None = None
+    attention_level: str | None = None
+
+
+class RiskScoreResponse(BaseModel):
+    entity_id: str
+    entity_name: str
+    entity_type: Literal["port", "chokepoint", "region"]
+    score: float
+    severity: str
+    component_scores: dict[str, Any]
+    missing_components: list[str] | None = None
+    reasons: list[str] | None = None
+    source_metrics: dict[str, Any] | None = None
+    freshness_status: str
+    as_of: datetime
+    lat: float | None = None
+    lon: float | None = None
+
+
+class DataFreshnessResponse(BaseModel):
+    source: str
+    latest_observed_at: datetime | None = None
+    latest_collected_at: datetime | None = None
+    freshness_status: str
+    rows: int = 0
+
+
+class DisruptionPropagationResponse(BaseModel):
+    id: int
+    source_entity_type: str
+    source_entity_id: str
+    source_entity_name: str
+    target_entity_type: str
+    target_entity_id: str
+    target_entity_name: str
+    route_lane: str | None = None
+    severity: str
+    confidence: float
+    explanation: str
+    source_metrics: dict[str, Any] | None = None
+    started_at: datetime
+    updated_at: datetime
+    status: str
+
+
+class VesselWatchlistResponse(BaseModel):
+    mmsi: int
+    reason: str
+    source_rule: str
+    priority: int
+    active: bool
+    entity_type: str | None = None
+    entity_id: str | None = None
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class VesselEnrichmentResponse(BaseModel):
+    mmsi: int
+    source: str
+    fetched_at: datetime
+    expires_at: datetime
+    status: str
+    confidence: float | None = None
+    data: dict[str, Any] | None = None
+    error: str | None = None
 
 
 class StoryEntity(BaseModel):

@@ -20,6 +20,7 @@ import {
   type StoryAnalyzeResponse,
   type StoryEntity,
 } from '../api/client'
+import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
 import {
   forecastLower,
@@ -29,6 +30,8 @@ import {
   forecastValue,
   metricValue,
   relativeTime,
+  rowDataMode,
+  shouldUseDemoRows,
 } from '../api/viewModels'
 
 type CatFilter = 'all' | InsightCategory
@@ -81,7 +84,15 @@ const correlationValue = (matrix: CorrelationCell[], row: string, col: string) =
 }
 
 const CorrelationHeatmap: React.FC<{ data: CorrelationCell[]; labels: string[]; demo: boolean }> = ({ data, labels, demo }) => {
-  const finalLabels = labels.length >= 2 ? labels : ['BDI', 'FBX', 'WCI']
+  const finalLabels = labels.length >= 2 ? labels : demo ? ['BDI', 'FBX', 'WCI'] : []
+  if (finalLabels.length < 2 || (!demo && data.length === 0)) {
+    return (
+      <div>
+        <EmptyState title="No correlation rows" detail="Correlation cells need at least two live freight index series with overlapping history." compact />
+        <DataProvenance mode="empty" source="/api/correlations" />
+      </div>
+    )
+  }
   return (
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: `44px repeat(${finalLabels.length}, 1fr)`, gap: 3, alignItems: 'center' }}>
@@ -109,7 +120,7 @@ const CorrelationHeatmap: React.FC<{ data: CorrelationCell[]; labels: string[]; 
           </React.Fragment>
         ))}
       </div>
-      <DataProvenance mode={demo ? 'demo' : 'live'} source={demo ? 'Fallback matrix until correlation API has overlap' : 'Aligned daily freight index correlations'} />
+      <DataProvenance mode={demo ? 'demo' : 'live'} source={demo ? 'Explicit demo correlation matrix' : 'Aligned daily freight index correlations'} />
     </div>
   )
 }
@@ -175,7 +186,15 @@ const AnomalyTimeline: React.FC<{ anomalies: AnomalyResponse[]; demo: boolean }>
     { day: 18, severity: 'medium', label: 'Demo FBX movement' },
     { day: 52, severity: 'high', label: 'Demo LA/LB queue' },
     { day: 83, severity: 'high', label: 'Demo Shanghai congestion' },
-  ]
+  ].filter(() => demo)
+  if (events.length === 0) {
+    return (
+      <div>
+        <EmptyState title="No live anomaly rows" detail="Anomaly events appear after detection jobs write backend rows." compact />
+        <DataProvenance mode="empty" source="/api/anomalies" />
+      </div>
+    )
+  }
   return (
     <div>
       <div style={{ position: 'relative', height: 72, marginTop: 4 }}>
@@ -195,7 +214,7 @@ const AnomalyTimeline: React.FC<{ anomalies: AnomalyResponse[]; demo: boolean }>
           <div key={label} style={{ position: 'absolute', bottom: 0, left: `${(i / 3) * 100}%`, transform: 'translateX(-50%)', fontSize: 10, color: 'var(--text-muted)' }}>{label}</div>
         ))}
       </div>
-      <DataProvenance mode={demo ? 'demo' : 'live'} source={demo ? 'Fallback anomaly examples' : '/api/anomalies'} />
+      <DataProvenance mode={demo ? 'demo' : 'live'} source={demo ? 'Explicit demo anomaly examples' : '/api/anomalies'} />
     </div>
   )
 }
@@ -297,17 +316,34 @@ export const InsightsHub: React.FC = () => {
     model: insight.narrative_model,
     metrics: insight.metrics,
   })), [insightsQuery.data])
-  const usingDemoFeed = liveFeed.length === 0
+  const usingDemoFeed = shouldUseDemoRows({
+    loading: insightsQuery.isLoading,
+    error: insightsQuery.error,
+    rowCount: liveFeed.length,
+    demoEnabled: ENABLE_DEMO_FALLBACK,
+  })
   const feed = usingDemoFeed ? DEMO_INSIGHTS : liveFeed
   const filtered = catFilter === 'all' ? feed : feed.filter(item => item.category === catFilter)
   const error = insightsQuery.error ?? indicesQuery.error ?? anomaliesQuery.error ?? correlationsQuery.error
   const labels = supportedNames.map(displayName)
+  const useDemoCorrelations = shouldUseDemoRows({
+    loading: correlationsQuery.isLoading,
+    error: correlationsQuery.error,
+    rowCount: correlationsQuery.data?.length ?? 0,
+    demoEnabled: ENABLE_DEMO_FALLBACK,
+  })
+  const useDemoAnomalies = shouldUseDemoRows({
+    loading: anomaliesQuery.isLoading,
+    error: anomaliesQuery.error,
+    rowCount: anomaliesQuery.data?.length ?? 0,
+    demoEnabled: ENABLE_DEMO_FALLBACK,
+  })
 
   return (
     <PageShell
       title="Insights Hub"
       subtitle="Evidence-backed narratives, correlations, forecasts, anomalies, and Story Mode."
-      action={<DataProvenance mode={usingDemoFeed ? 'demo' : 'live'} source={usingDemoFeed ? 'No live insight rows' : '/api/insights/latest'} />}
+      action={<DataProvenance mode={rowDataMode({ loading: insightsQuery.isLoading, error: insightsQuery.error, rowCount: liveFeed.length, demoEnabled: ENABLE_DEMO_FALLBACK })} source={usingDemoFeed ? 'Explicit demo fallback enabled' : '/api/insights/latest'} />}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {error && <ErrorPanel error={error} title="One or more insight APIs are unavailable" compact />}
@@ -325,7 +361,7 @@ export const InsightsHub: React.FC = () => {
             </div>
             <Card style={{ padding: '4px 16px' }}>
               {insightsQuery.isLoading && <SkeletonBlock height={180} lines={5} />}
-              {!insightsQuery.isLoading && usingDemoFeed && <DataProvenance mode="demo" source="Fallback examples until insight rows exist" />}
+              {!insightsQuery.isLoading && usingDemoFeed && <DataProvenance mode="demo" source="Explicit demo examples until insight rows exist" />}
               {filtered.map((insight, i) => (
                 <div key={`${insight.title}-${i}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <InsightRow text={insight.text} category={insight.category} time={insight.time} aiGenerated={insight.aiGenerated ?? false} />
@@ -336,13 +372,18 @@ export const InsightsHub: React.FC = () => {
                   </div>
                 </div>
               ))}
-              {filtered.length === 0 && <EmptyState title="No insights in this category" detail="Change filter or wait for analysis jobs to generate rows." />}
+              {!insightsQuery.isLoading && filtered.length === 0 && (
+                <EmptyState
+                  title={feed.length === 0 ? 'No live insights' : 'No insights in this category'}
+                  detail={feed.length === 0 ? 'Insight feed stays empty in normal mode until analysis jobs generate rows.' : 'Change filter or wait for analysis jobs to generate rows.'}
+                />
+              )}
             </Card>
           </div>
 
           <Card style={{ padding: 16 }}>
             <SectionHeader title="Correlation Heatmap" sub={labels.length ? labels.join(' · ') : 'Waiting for index overlap'} />
-            <CorrelationHeatmap data={correlationsQuery.data ?? []} labels={labels} demo={!correlationsQuery.data?.length} />
+            {correlationsQuery.isLoading ? <SkeletonBlock height={140} /> : <CorrelationHeatmap data={correlationsQuery.data ?? []} labels={labels} demo={useDemoCorrelations} />}
           </Card>
         </div>
 
@@ -359,7 +400,7 @@ export const InsightsHub: React.FC = () => {
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
           <Card style={{ padding: 16 }}>
             <SectionHeader title="Anomaly Timeline" sub="90-day anomaly events with explicit fallback state." />
-            {anomaliesQuery.isLoading ? <SkeletonBlock height={94} /> : <AnomalyTimeline anomalies={anomaliesQuery.data ?? []} demo={!anomaliesQuery.data?.length} />}
+            {anomaliesQuery.isLoading ? <SkeletonBlock height={94} /> : <AnomalyTimeline anomalies={anomaliesQuery.data ?? []} demo={useDemoAnomalies} />}
           </Card>
           <Card style={{ padding: 16 }}>
             <SectionHeader title="Story Mode" sub="LLM-assisted relationship analysis with caveats." />

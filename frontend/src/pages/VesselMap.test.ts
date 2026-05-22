@@ -45,3 +45,21 @@ describe('VesselMap globe mode toggle', () => {
     expect(source).toMatch(/>\s*3D\s*</)
   })
 })
+
+describe('VesselMap selective drilldown', () => {
+  it('uses watchlist APIs and labels the map as selective AIS drilldown', () => {
+    expect(source).toMatch(/vesselWatchlist/)
+    expect(source).toMatch(/watchedVesselPositions/)
+    expect(source).toMatch(/watchedVesselAnomalies/)
+    expect(source).toMatch(/watchedVesselEtaDrift/)
+    expect(source).toMatch(/Selective Vessel Drilldown/)
+    expect(source).toMatch(/Watchlist AIS/)
+  })
+
+  it('shows ETA drift, anomaly markers, and watchlist reason in drawer', () => {
+    expect(source).toMatch(/Operational Context/)
+    expect(source).toMatch(/Watchlist reason/)
+    expect(source).toMatch(/ETA drift/)
+    expect(source).toMatch(/Anomaly markers/)
+  })
+})

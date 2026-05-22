@@ -1,10 +1,13 @@
 import React, { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiClient, type PortCongestionResponse } from '../api/client'
+import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
 import {
   buildPortViewModels,
   formatDateTime,
+  rowDataMode,
+  shouldUseDemoRows,
   relativeTime,
   type PortViewModel,
   type Severity,
@@ -70,13 +73,15 @@ function demoPorts(): PortViewModel[] {
   }))
 }
 
-function timelineValues(rows: PortCongestionResponse[], fallbackSeed: number): number[] {
+function timelineValues(rows: PortCongestionResponse[], fallbackSeed: number, demo: boolean): number[] {
   if (rows.length > 1) return rows.map(row => row.total_in_area)
+  if (!demo) return []
   return Array.from({ length: 14 }, (_, i) => Math.max(8, Math.round(35 + Math.sin((i + fallbackSeed) / 2) * 12 + fallbackSeed)))
 }
 
-const PortCard: React.FC<{ port: PortViewModel; onClick: () => void }> = ({ port, onClick }) => {
+const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => void }> = ({ port, demo, onClick }) => {
   const row = port.congestion
+  const sparkData = demo ? timelineValues([], port.id, true) : []
   return (
     <Card hover onClick={onClick} style={{ padding: '14px 16px', cursor: 'pointer' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
@@ -104,7 +109,7 @@ const PortCard: React.FC<{ port: PortViewModel; onClick: () => void }> = ({ port
             </div>
           </div>
         </div>
-        <Sparkline data={timelineValues([], port.id)} color={severityColor[port.severity]} width={72} height={36} />
+        <Sparkline data={sparkData} color={severityColor[port.severity]} width={72} height={36} />
       </div>
     </Card>
   )
@@ -114,11 +119,14 @@ const PortDetail: React.FC<{
   port: PortViewModel
   timeline: PortCongestionResponse[]
   loading: boolean
+  demo: boolean
   onClose: () => void
   onNavigate?: (page: PageId) => void
-}> = ({ port, timeline, loading, onClose, onNavigate }) => {
-  const values = timelineValues(timeline, port.id)
-  const min = Math.min(...values), max = Math.max(...values), range = max - min || 1
+}> = ({ port, timeline, loading, demo, onClose, onNavigate }) => {
+  const values = timelineValues(timeline, port.id, demo)
+  const min = values.length ? Math.min(...values) : 0
+  const max = values.length ? Math.max(...values) : 1
+  const range = max - min || 1
   const W = 360, H = 116
   const points = values.map((value, i) => ({
     x: 12 + (i / Math.max(values.length - 1, 1)) * (W - 24),
@@ -139,7 +147,7 @@ const PortDetail: React.FC<{
         <button aria-label="Close port details" onClick={onClose} style={{ border: 0, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}><Icons.X size={18} /></button>
       </div>
       <div style={{ padding: 18, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <DataProvenance mode={port.congestion ? 'live' : 'demo'} source="Port congestion + reference table" timestamp={port.congestion ? formatDateTime(port.congestion.time) : undefined} stale={port.stale} />
+        <DataProvenance mode={demo ? 'demo' : port.congestion ? 'live' : 'empty'} source="Port congestion + reference table" timestamp={port.congestion ? formatDateTime(port.congestion.time) : undefined} stale={port.stale} />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           <MetricCard label="In Area" value={port.congestion?.total_in_area ?? 0} tone="info" />
           <MetricCard label="Anchored" value={port.congestion?.anchored_count ?? 0} tone={port.severity === 'high' ? 'danger' : 'default'} />
@@ -147,21 +155,23 @@ const PortDetail: React.FC<{
         </div>
         <Card style={{ padding: 14 }}>
           <SectionHeader title="Congestion Timeline" sub={loading ? 'Loading latest 30-day API timeline' : `${timeline.length || values.length} points`} />
-          {loading ? <SkeletonBlock height={116} /> : (
+          {loading ? <SkeletonBlock height={116} /> : values.length > 1 ? (
             <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }} role="img" aria-label={`${port.name} congestion timeline`}>
               <line x1="12" y1={H - 18} x2={W - 12} y2={H - 18} stroke="var(--border-subtle)" />
               <path d={path} fill="none" stroke={severityColor[port.severity]} strokeWidth="1.8" strokeLinejoin="round" />
               {points.map((point, i) => i === points.length - 1 ? <circle key={i} cx={point.x} cy={point.y} r="3.5" fill={severityColor[port.severity]} /> : null)}
             </svg>
+          ) : (
+            <EmptyState title="No congestion timeline rows" detail="Collector history has not populated this port yet." compact />
           )}
         </Card>
         <Card style={{ padding: 14 }}>
           <SectionHeader title="Why This Matters" sub="Operational interpretation" />
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.65 }}>
             {port.severity === 'high'
-              ? `${port.name} is in the high congestion band. Demo this as a candidate source of dwell-time pressure and freight-rate ripple effects.`
+              ? `${port.name} is in the high congestion band based on available congestion rows. Review dwell-time pressure and freight-rate ripple effects.`
               : port.severity === 'medium'
-                ? `${port.name} is elevated but not critical. Use this as a watchlist example for regional port pressure.`
+                ? `${port.name} is elevated but not critical. Review it as a regional port pressure watchlist candidate.`
                 : `${port.name} is currently in the low congestion band based on the available frontend-derived thresholds.`}
           </p>
         </Card>
@@ -187,7 +197,14 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
     queryFn: ({ signal }) => apiClient.portCongestion({ signal }),
   })
   const livePorts = useMemo(() => buildPortViewModels(portsQuery.data ?? [], congestionQuery.data ?? []), [portsQuery.data, congestionQuery.data])
-  const usingDemo = portsQuery.isError || congestionQuery.isError || livePorts.length === 0
+  const loading = portsQuery.isLoading || congestionQuery.isLoading
+  const error = portsQuery.error ?? congestionQuery.error
+  const usingDemo = shouldUseDemoRows({
+    loading,
+    error,
+    rowCount: livePorts.length,
+    demoEnabled: ENABLE_DEMO_FALLBACK,
+  })
   const ports = usingDemo ? demoPorts() : livePorts
   const timelineQuery = useQuery({
     queryKey: selectedPort ? queryKeys.portTimeline(selectedPort.id, 30) : ['ports', 'no-selection'],
@@ -204,13 +221,12 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
   const highCount = ports.filter(port => port.severity === 'high').length
   const medCount = ports.filter(port => port.severity === 'medium').length
   const totalVessels = ports.reduce((sum, port) => sum + (port.congestion?.total_in_area ?? 0), 0)
-  const error = portsQuery.error ?? congestionQuery.error
 
   return (
     <PageShell
       title="Ports"
       subtitle="Congestion ranking, port search, and drill-down timeline from frontend-derived backend view models."
-      action={<DataProvenance mode={usingDemo ? 'demo' : 'live'} source={usingDemo ? 'API sparse/offline' : '/api/ports + /api/ports/congestion'} />}
+      action={<DataProvenance mode={rowDataMode({ loading, error, rowCount: livePorts.length, demoEnabled: ENABLE_DEMO_FALLBACK })} source={usingDemo ? 'Explicit demo fallback enabled' : '/api/ports + /api/ports/congestion'} />}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {error && <ErrorPanel error={error} title="Port API unavailable" compact />}
@@ -247,12 +263,17 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
               </div>
             </Card>
 
-            {(portsQuery.isLoading || congestionQuery.isLoading) && !usingDemo ? <SkeletonBlock height={240} lines={6} /> : (
+            {loading && !usingDemo ? <SkeletonBlock height={240} lines={6} /> : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
-                {filtered.map(port => <PortCard key={port.id} port={port} onClick={() => setSelectedPort(port)} />)}
+                {filtered.map(port => <PortCard key={port.id} port={port} demo={usingDemo} onClick={() => setSelectedPort(port)} />)}
               </div>
             )}
-            {filtered.length === 0 && <EmptyState title="No ports match your filter" detail="Clear search or change region." />}
+            {!loading && filtered.length === 0 && (
+              <EmptyState
+                title={ports.length === 0 ? 'No live port rows' : 'No ports match your filter'}
+                detail={ports.length === 0 ? 'Ports stay empty in normal mode until the backend returns reference or congestion rows.' : 'Clear search or change region.'}
+              />
+            )}
           </div>
 
           <Card style={{ padding: 16, height: 'fit-content' }}>
@@ -266,6 +287,7 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
             port={selectedPort}
             timeline={timelineQuery.data ?? []}
             loading={timelineQuery.isLoading}
+            demo={usingDemo}
             onClose={() => setSelectedPort(null)}
             onNavigate={onNavigate}
           />

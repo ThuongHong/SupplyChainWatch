@@ -11,6 +11,10 @@ ROUTE_POINTS = {
     "PANAMA_APPROACH": (9.08, -79.68),
     "MALACCA_STRAIT": (2.5, 101.0),
 }
+HOURLY_INDICATORS = {
+    "wave_height": "WAVE_HEIGHT",
+    "wind_wave_height": "WIND_WAVE_HEIGHT",
+}
 
 
 class OpenMeteoMarineCollector(BaseCollector[FreightIndexRecord]):
@@ -34,18 +38,24 @@ class OpenMeteoMarineCollector(BaseCollector[FreightIndexRecord]):
                 },
             )
             hourly = payload.get("hourly", {})
-            for ts, wave_height in zip(
-                hourly.get("time", []), hourly.get("wave_height", []), strict=False
-            ):
-                if wave_height is None:
-                    continue
-                rows.append(
-                    {
-                        "time": datetime.fromisoformat(ts).replace(tzinfo=UTC),
-                        "index_name": f"WAVE_HEIGHT_{name}",
-                        "value": float(wave_height),
-                        "source": self.source,
-                        "metadata": {"lat": lat, "lon": lon},
-                    }
-                )
+            times = hourly.get("time", [])
+            for field, prefix in HOURLY_INDICATORS.items():
+                for ts, value in zip(times, hourly.get(field, []), strict=False):
+                    if value is None:
+                        continue
+                    rows.append(
+                        {
+                            "time": datetime.fromisoformat(ts).replace(tzinfo=UTC),
+                            "index_name": f"{prefix}_{name}",
+                            "value": float(value),
+                            "source": self.source,
+                            "metadata": {
+                                "api_key_required": False,
+                                "field": field,
+                                "lat": lat,
+                                "lon": lon,
+                                "provider": "Open-Meteo Marine",
+                            },
+                        }
+                    )
         return rows

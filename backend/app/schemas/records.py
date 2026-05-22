@@ -89,3 +89,26 @@ class TradeFlowRecord(BaseModel):
     flow: str | None = None
     value_usd: float | None = None
     weight_kg: float | None = None
+
+
+class PortWatchMetricRecord(BaseModel):
+    """Validated normalized PortWatch/PortStraitWatch metric."""
+
+    observed_at: datetime
+    entity_type: str = Field(pattern="^(port|chokepoint|region)$")
+    entity_id: str
+    entity_name: str
+    metric_name: str
+    metric_value: float
+    unit: str | None = None
+    source: str
+    source_entity_id: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("observed_at")
+    @classmethod
+    def ensure_observed_at_utc(cls, value: datetime) -> datetime:
+        """Normalize timestamps to UTC."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)

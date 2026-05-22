@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.analysis.maritime_risk import generate_risk_insights
 from app.db.models import Insight
 
 
@@ -11,6 +12,7 @@ def generate_insights(db: Session, limit: int = 10) -> int:
     created = 0
     created += _generate_index_change_insights(db, limit=max(1, limit // 2))
     created += _generate_anomaly_insights(db, limit=max(1, limit // 3))
+    created += generate_risk_insights(db, limit=max(1, limit // 3))
     created += _generate_forecast_insights(db, limit=max(1, limit - created))
     db.commit()
     return created

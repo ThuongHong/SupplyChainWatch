@@ -15,6 +15,16 @@ from app.schemas.records import VesselPositionRecord, VesselRecord
 
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
 GLOBAL_BOUNDING_BOX = [[[-90, -180], [90, 180]]]
+MONITORED_BOUNDING_BOXES = [
+    [[0.8, 103.4], [1.6, 104.2]],  # Singapore / Malacca east
+    [[30.8, 120.8], [31.7, 122.2]],  # Shanghai
+    [[51.5, 3.8], [52.3, 5.1]],  # Rotterdam
+    [[33.3, -118.8], [34.1, -117.7]],  # Los Angeles / Long Beach
+    [[29.7, 32.0], [31.5, 33.0]],  # Suez
+    [[8.7, -80.1], [9.5, -79.3]],  # Panama
+    [[12.0, 32.0], [30.0, 44.0]],  # Red Sea
+    [[40.0, 27.0], [47.5, 42.0]],  # Black Sea
+]
 
 
 class AISStreamCollector(BaseCollector[BaseModel]):
@@ -28,11 +38,13 @@ class AISStreamCollector(BaseCollector[BaseModel]):
         *,
         sample_seconds: float = 30,
         max_records: int = 1000,
+        watchlist_mmsi: set[int] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.sample_seconds = sample_seconds
         self.max_records = max_records
+        self.watchlist_mmsi = watchlist_mmsi or set()
 
     def collect(self) -> list[dict[str, Any]]:
         settings = get_settings()
@@ -52,9 +64,11 @@ class AISStreamCollector(BaseCollector[BaseModel]):
         for row in rows:
             record_type = row.pop("_record_type", "position")
             if record_type == "vessel":
-                records.append(VesselRecord.model_validate(row))
+                if is_relevant_ais_row(row, self.watchlist_mmsi):
+                    records.append(VesselRecord.model_validate(row))
             else:
-                records.append(VesselPositionRecord.model_validate(row))
+                if is_relevant_ais_row(row, self.watchlist_mmsi):
+                    records.append(VesselPositionRecord.model_validate(row))
         return records
 
     async def _collect_websocket(
@@ -66,7 +80,9 @@ class AISStreamCollector(BaseCollector[BaseModel]):
     ) -> list[dict[str, Any]]:
         subscribe_message = {
             "APIKey": api_key,
-            "BoundingBoxes": GLOBAL_BOUNDING_BOX,
+            "BoundingBoxes": (
+                MONITORED_BOUNDING_BOXES if not self.watchlist_mmsi else GLOBAL_BOUNDING_BOX
+            ),
             "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
         }
 
@@ -146,6 +162,7 @@ def _parse_position_message(message: dict[str, Any]) -> dict[str, Any] | None:
         "sog": _optional_float(position.get("Sog")),
         "cog": _optional_float(position.get("Cog")),
         "nav_status": _optional_int(position.get("NavigationalStatus")),
+        "_risk_area": _in_monitored_area(float(lat), float(lon)),
     }
 
 
@@ -173,6 +190,10 @@ def _parse_static_message(message: dict[str, Any]) -> dict[str, Any] | None:
         "length": _sum_dimension(dimension.get("A"), dimension.get("B")),
         "width": _sum_dimension(dimension.get("C"), dimension.get("D")),
         "last_seen": _parse_timestamp(message.get("MetaData", {}).get("time_utc")),
+        "_risk_area": _in_monitored_area(
+            float(message.get("MetaData", {}).get("latitude", 999)),
+            float(message.get("MetaData", {}).get("longitude", 999)),
+        ),
     }
 
 
@@ -197,7 +218,21 @@ def _parse_static_position_message(message: dict[str, Any]) -> dict[str, Any] | 
         "sog": None,
         "cog": None,
         "nav_status": None,
+        "_risk_area": _in_monitored_area(float(lat), float(lon)),
     }
+
+
+def is_relevant_ais_row(row: dict[str, Any], watchlist_mmsi: set[int] | None = None) -> bool:
+    watchlist = watchlist_mmsi or set()
+    mmsi = row.get("mmsi")
+    return bool(row.get("_risk_area")) or (mmsi is not None and int(mmsi) in watchlist)
+
+
+def _in_monitored_area(lat: float, lon: float) -> bool:
+    for (south, west), (north, east) in MONITORED_BOUNDING_BOXES:
+        if south <= lat <= north and west <= lon <= east:
+            return True
+    return False
 
 
 def _ais_type_label(vessel_type: int | None) -> str | None:

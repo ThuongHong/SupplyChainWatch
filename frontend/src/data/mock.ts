@@ -16,6 +16,15 @@ export const MOCK = {
   fbxSpark: [2211,2189,2178,2193,2168,2182,2159,2171,2148,2163,2141,2155,2145,2156],
   vesselSpark: [12691,12704,12698,12723,12735,12741,12719,12756,12778,12791,12803,12812,12831,12847],
   anomalySpark: [3,2,4,2,1,3,2,5,3,4,6,4,5,7],
+  portRisk: [
+    { name: 'Singapore' },
+    { name: 'Shanghai' },
+    { name: 'Rotterdam' },
+    { name: 'Los Angeles' },
+    { name: 'Suez Canal' },
+    { name: 'Panama Canal' },
+    { name: 'Strait of Malacca' },
+  ],
   insights: [
     { text: 'BDI surged 4.2% over 3 consecutive sessions, correlating with a spike in Chinese iron ore imports.', category: 'trend' as const, time: '12m ago' },
     { text: 'Shanghai port congestion hit a 90-day high — 142 vessels currently at anchor.', category: 'anomaly' as const, time: '38m ago' },

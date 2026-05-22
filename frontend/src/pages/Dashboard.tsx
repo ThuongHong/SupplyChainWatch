@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { Sparkline } from '../components/Sparkline'
-import { AreaChart } from '../components/AreaChart'
 import { MiniMap } from '../components/MiniMap'
 import { InsightRow, type InsightCategory } from '../components/InsightRow'
 import { Icons } from '../components/icons'
@@ -17,15 +16,23 @@ import {
   SkeletonBlock,
 } from '../components/DataState'
 import { MOCK, fmtNum, fmtPct } from '../data/mock'
-import { apiClient, type InsightResponse, type OverviewStats } from '../api/client'
+import {
+  apiClient,
+  type DisruptionPropagationResponse,
+  type InsightResponse,
+  type OverviewStats,
+  type RiskScoreResponse,
+} from '../api/client'
+import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
 import {
   activeHighAnomalies,
   formatDateTime,
   isStale,
-  latestPoint,
   percentChange,
   relativeTime,
+  rowDataMode,
+  shouldUseDemoRows,
 } from '../api/viewModels'
 import type { PageId } from '../components/layout/Sidebar'
 
@@ -41,19 +48,26 @@ const normalizeCategory = (category?: string | null): InsightCategory => {
   return 'trend'
 }
 
-const chartLabels = (points: { time: string }[]) =>
-  points.slice(-30).map(point => new Date(point.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))
-
-const chartValues = (points: { value: number }[]) => points.slice(-30).map(point => point.value)
-
-const kpiChange = (value: number | null) => value == null ? 'No trend' : `${fmtPct(value)} · 7-point change`
-
 const riskFromStats = (stats: OverviewStats | null, highAnomalies: number) => {
   const count = stats?.high_severity_anomalies ?? highAnomalies
   if (count >= 5) return { label: 'Elevated global risk', severity: 'high' as const, detail: `${count} high-severity anomalies in the recent window.` }
   if (count > 0) return { label: 'Watchlist active', severity: 'medium' as const, detail: `${count} high-severity anomalies require review.` }
   return { label: 'Normal operating band', severity: 'low' as const, detail: 'No high-severity anomaly concentration in the latest API window.' }
 }
+
+const riskTone = (severity?: string) => severity === 'high' ? 'danger' : severity === 'medium' ? 'warning' : 'success'
+const riskScore = (row?: RiskScoreResponse) => row ? Math.round(row.score) : 0
+const shortReason = (row?: RiskScoreResponse) => row?.reasons?.[0] ?? row?.freshness_status ?? 'No live PortWatch score'
+const demoPortRiskRows = (): RiskScoreResponse[] => MOCK.portRisk.map((item, index) => ({
+  entity_id: `demo-${item.name}`,
+  entity_name: item.name,
+  entity_type: 'port',
+  score: 78 - index * 7,
+  severity: index < 2 ? 'high' : 'medium',
+  component_scores: {},
+  freshness_status: 'demo',
+  as_of: new Date().toISOString(),
+}))
 
 export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNavigate }) => {
   const [showTour, setShowTour] = useState(() => localStorage.getItem('gsw-onboarding-seen') !== '1')
@@ -71,6 +85,28 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
     queryKey: queryKeys.portCongestion,
     queryFn: ({ signal }) => apiClient.portCongestion({ signal }),
   })
+  const portRiskQuery = useQuery({
+    queryKey: queryKeys.globalPortRisk(25),
+    queryFn: ({ signal }) => apiClient.globalPortRisk(25, { signal }),
+    refetchInterval: 60_000,
+  })
+  const chokepointRiskQuery = useQuery({
+    queryKey: queryKeys.chokepointStress(25),
+    queryFn: ({ signal }) => apiClient.chokepointStress(25, { signal }),
+    refetchInterval: 60_000,
+  })
+  const propagationQuery = useQuery({
+    queryKey: queryKeys.disruptionPropagation,
+    queryFn: ({ signal }) => apiClient.disruptionPropagation({ signal }),
+  })
+  const freshnessQuery = useQuery({
+    queryKey: queryKeys.dataFreshness,
+    queryFn: ({ signal }) => apiClient.dataFreshness({ signal }),
+  })
+  const watchlistQuery = useQuery({
+    queryKey: queryKeys.vesselWatchlist,
+    queryFn: ({ signal }) => apiClient.vesselWatchlist({ signal }),
+  })
   const anomaliesQuery = useQuery({
     queryKey: queryKeys.anomalies(30),
     queryFn: ({ signal }) => apiClient.anomalies({ days: 30 }, { signal }),
@@ -86,12 +122,19 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
   const bdi = indexQueries[0].data ?? []
   const fbx = indexQueries[1].data ?? []
   const liveStats = statsQuery.data ?? null
-  const hasLiveSummary = Boolean(liveStats)
-  const apiError = statsQuery.error ?? insightsQuery.error ?? congestionQuery.error ?? anomaliesQuery.error ?? indexQueries.find(q => q.error)?.error
-  const usingDemo = !hasLiveSummary || indexQueries.some(q => q.isError)
+  const apiError = portRiskQuery.error ?? chokepointRiskQuery.error ?? statsQuery.error ?? insightsQuery.error ?? congestionQuery.error ?? anomaliesQuery.error ?? indexQueries.find(q => q.error)?.error
   const stale = isStale(liveStats?.generated_at, 6)
   const highAnomalies = activeHighAnomalies(anomaliesQuery.data ?? [])
   const risk = riskFromStats(liveStats, highAnomalies)
+  const portRiskRows = portRiskQuery.data ?? []
+  const chokepointRows = chokepointRiskQuery.data ?? []
+  const propagationRows = propagationQuery.data ?? []
+  const freshnessRows = freshnessQuery.data ?? []
+  const watchlistRows = watchlistQuery.data ?? []
+  const topPort = portRiskRows[0]
+  const topChokepoint = chokepointRows[0]
+  const derivedRiskLive = portRiskRows.length > 0 || chokepointRows.length > 0
+  const summaryUnavailable = !liveStats && !derivedRiskLive
 
   const liveInsights = useMemo<FeedInsight[]>(() => (insightsQuery.data ?? []).map((insight: InsightResponse) => ({
     text: insight.narrative_llm || insight.narrative,
@@ -99,32 +142,25 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
     time: relativeTime(insight.narrative_generated_at || insight.generated_at),
     aiGenerated: Boolean(insight.narrative_llm),
   })), [insightsQuery.data])
-  const insights: FeedInsight[] = liveInsights.length > 0 ? liveInsights : MOCK.insights.map(item => ({ ...item, aiGenerated: false }))
+  const useDemoInsights = shouldUseDemoRows({
+    loading: insightsQuery.isLoading,
+    error: insightsQuery.error,
+    rowCount: liveInsights.length,
+    demoEnabled: ENABLE_DEMO_FALLBACK,
+  })
+  const insights: FeedInsight[] = liveInsights.length > 0 ? liveInsights : useDemoInsights ? MOCK.insights.map(item => ({ ...item, aiGenerated: false })) : []
 
-  const bdiLatest = liveStats?.latest_bdi ?? latestPoint(bdi)?.value ?? 1847
-  const fbxLatest = liveStats?.latest_fbx ?? latestPoint(fbx)?.value ?? 2156
   const bdiChange = percentChange(bdi)
   const fbxChange = percentChange(fbx)
-  const chartHasLive = bdi.length > 3 && fbx.length > 3
-  const chartData = chartHasLive
-    ? {
-      labels: chartLabels(bdi.length <= fbx.length ? bdi : fbx),
-      datasets: [
-        { data: chartValues(bdi), color: 'var(--chart-1)' },
-        { data: chartValues(fbx), color: 'var(--chart-2)', prefix: '$' },
-      ],
-    }
-    : {
-      labels: MOCK.dates30,
-      datasets: [
-        { data: MOCK.bdi30, color: 'var(--chart-1)' },
-        { data: MOCK.fbx30, color: 'var(--chart-2)', prefix: '$' },
-      ],
-    }
+  const useDemoPortRisk = shouldUseDemoRows({
+    loading: portRiskQuery.isLoading,
+    error: portRiskQuery.error,
+    rowCount: portRiskRows.length,
+    demoEnabled: ENABLE_DEMO_FALLBACK,
+  })
+  const displayedPortRiskRows = portRiskRows.length ? portRiskRows : useDemoPortRisk ? demoPortRiskRows() : []
 
   const highPorts = (congestionQuery.data ?? []).filter(row => row.total_in_area >= 100 || row.anchored_count >= 45).length
-  const vesselCount = liveStats?.active_vessels ?? 12847
-  const anomalyCount = (liveStats?.high_severity_anomalies ?? highAnomalies) || 7
 
   const dismissTour = () => {
     localStorage.setItem('gsw-onboarding-seen', '1')
@@ -159,44 +195,89 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         {apiError && <ErrorPanel error={apiError} title="Some dashboard APIs are unavailable" compact />}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(4, minmax(150px, 1fr))', gap: 12 }}>
-          <Card style={{ padding: 16, border: `1px solid ${risk.severity === 'high' ? 'var(--danger)' : risk.severity === 'medium' ? 'var(--warning)' : 'var(--border-default)'}` }}>
+          <Card style={{ padding: 16, border: `1px solid ${topPort?.severity === 'high' ? 'var(--danger)' : topPort?.severity === 'medium' ? 'var(--warning)' : 'var(--border-default)'}` }}>
             <SectionHeader
-              title="Global Risk Overview"
-              sub={risk.detail}
-              action={<Badge variant={risk.severity === 'high' ? 'danger' : risk.severity === 'medium' ? 'warning' : 'success'}>{risk.label}</Badge>}
+              title="PortWatch Intelligence"
+              sub={topPort ? `${topPort.entity_name}: ${shortReason(topPort)}` : summaryUnavailable ? 'No live overview or PortWatch risk rows' : risk.detail}
+              action={<Badge variant={topPort ? riskTone(topPort.severity) : summaryUnavailable ? 'default' : (risk.severity === 'high' ? 'danger' : risk.severity === 'medium' ? 'warning' : 'success')}>{topPort ? `${Math.round(topPort.score)}/100` : summaryUnavailable ? 'Unavailable' : risk.label}</Badge>}
             />
             <DataProvenance
-              mode={usingDemo ? 'demo' : 'live'}
-              source={usingDemo ? 'API unavailable or sparse' : 'Stats, anomalies, congestion'}
-              timestamp={liveStats ? `Updated ${relativeTime(liveStats.generated_at)}` : undefined}
-              stale={stale}
+              mode={rowDataMode({ loading: portRiskQuery.isLoading || chokepointRiskQuery.isLoading, error: portRiskQuery.error ?? chokepointRiskQuery.error, rowCount: Number(derivedRiskLive), demoEnabled: ENABLE_DEMO_FALLBACK })}
+              source={derivedRiskLive ? 'PortWatch derived risk' : ENABLE_DEMO_FALLBACK ? 'Demo risk fallback enabled' : 'PortWatch derived risk unavailable'}
+              timestamp={topPort ? `As of ${relativeTime(topPort.as_of)}` : liveStats ? `Updated ${relativeTime(liveStats.generated_at)}` : undefined}
+              stale={topPort?.freshness_status === 'stale' || stale}
             />
           </Card>
-          <MetricCard label="Baltic Dry Index" value={fmtNum(Math.round(bdiLatest))} sub={kpiChange(bdiChange)} tone={bdiChange != null && bdiChange < 0 ? 'danger' : 'info'} icon={<Icons.TrendingUp size={15} />} footer={<Sparkline data={chartHasLive ? chartValues(bdi).slice(-14) : MOCK.bdiSpark} color="var(--chart-1)" width={90} height={28} />} />
-          <MetricCard label="Freightos Baltic" value={`$${fmtNum(Math.round(fbxLatest))}`} sub={kpiChange(fbxChange)} tone={fbxChange != null && fbxChange > 0 ? 'warning' : 'info'} icon={<Icons.Activity size={15} />} footer={<Sparkline data={chartHasLive ? chartValues(fbx).slice(-14) : MOCK.fbxSpark} color="var(--chart-2)" width={90} height={28} />} />
-          <MetricCard label="Active Vessels" value={fmtNum(vesselCount)} sub="latest AIS snapshot" tone="success" icon={<Icons.Ship size={15} />} footer={<Sparkline data={MOCK.vesselSpark} color="var(--chart-3)" width={90} height={28} />} />
-          <MetricCard label="High Anomalies" value={fmtNum(anomalyCount)} sub="30-day severity filter" tone={anomalyCount > 0 ? 'danger' : 'success'} icon={<Icons.AlertTriangle size={15} />} footer={<Sparkline data={MOCK.anomalySpark} color="var(--danger)" width={90} height={28} />} />
+          <MetricCard label="Top Port Risk" value={topPort ? `${riskScore(topPort)}` : '0'} sub={topPort?.entity_name ?? 'No score rows'} tone={topPort ? riskTone(topPort.severity) : 'info'} icon={<Icons.AlertTriangle size={15} />} footer={<Sparkline data={portRiskRows.slice(0, 8).map(row => row.score)} color="var(--danger)" width={90} height={28} />} />
+          <MetricCard label="Chokepoint Stress" value={topChokepoint ? `${riskScore(topChokepoint)}` : '0'} sub={topChokepoint?.entity_name ?? 'No score rows'} tone={topChokepoint ? riskTone(topChokepoint.severity) : 'info'} icon={<Icons.Activity size={15} />} footer={<Sparkline data={chokepointRows.slice(0, 8).map(row => row.score)} color="var(--warning)" width={90} height={28} />} />
+          <MetricCard label="Watchlist Vessels" value={fmtNum(watchlistRows.length)} sub={watchlistRows.length ? 'selective AIS layer' : 'No watchlist rows'} tone={watchlistRows.length ? 'success' : 'info'} icon={<Icons.Ship size={15} />} />
+          <MetricCard label="Propagation Links" value={fmtNum(propagationRows.length)} sub={propagationRows.length ? 'downstream impact' : 'No active links'} tone={propagationRows.length > 0 ? 'warning' : 'success'} icon={<Icons.TrendingUp size={15} />} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(300px, 2fr)', gap: 12 }}>
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader
-              title="Freight Index Trends"
-              sub={chartHasLive ? 'Latest BDI and FBX_GLOBAL API history' : 'Demo fallback · backend history not available'}
-              action={<DataProvenance mode={chartHasLive ? 'live' : 'demo'} source="BDI · FBX" />}
+              title="Global Port Risk Ranking"
+              sub={portRiskRows.length ? `${portRiskRows.length} monitored ports scored` : useDemoPortRisk ? 'Demo fallback risk scores' : 'Awaiting PortWatch risk scores'}
+              action={<DataProvenance mode={rowDataMode({ loading: portRiskQuery.isLoading, error: portRiskQuery.error, rowCount: portRiskRows.length, demoEnabled: ENABLE_DEMO_FALLBACK })} source="PortWatch · derived score" />}
             />
-            {(indexQueries.some(q => q.isLoading) && !chartHasLive) ? <SkeletonBlock height={200} /> : (
-              <AreaChart datasets={chartData.datasets} labels={chartData.labels} height={200} />
+            {portRiskQuery.isLoading ? <SkeletonBlock height={200} /> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {displayedPortRiskRows.slice(0, 7).map(row => (
+                  <div key={row.entity_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 80px minmax(160px, 2fr)', gap: 10, alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600 }}>{row.entity_name}</span>
+                    <Badge variant={riskTone(row.severity)}>{Math.round(row.score)}/100</Badge>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{shortReason(row)}</span>
+                  </div>
+                ))}
+                {displayedPortRiskRows.length === 0 && <EmptyState title="No PortWatch risk score rows" detail="Run PortWatch collection and maritime risk scoring to populate this ranking." compact />}
+              </div>
             )}
           </Card>
 
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader
-              title="Port Hotspots"
-              sub={congestionQuery.data?.length ? `${highPorts} ports in elevated pressure band` : 'Demo fallback overlay'}
-              action={<DataProvenance mode={congestionQuery.data?.length ? 'live' : 'demo'} source="Port congestion" />}
+              title="Congestion Heatmap"
+              sub={portRiskRows.length ? `${topPort?.entity_name ?? 'Port'} leads risk ranking` : 'No live risk overlay'}
+              action={<DataProvenance mode={portRiskRows.length ? 'live' : congestionQuery.isLoading ? 'loading' : 'empty'} source="Risk heatmap" />}
             />
             <MiniMap height={176} congestion={congestionQuery.data ?? []} />
+          </Card>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 2fr) minmax(260px, 1fr)', gap: 12 }}>
+          <Card style={{ padding: '16px', minWidth: 0 }}>
+            <SectionHeader title="Chokepoint Stress" sub="Suez, Panama, Malacca, Red Sea, Black Sea" />
+            {(chokepointRows.length ? chokepointRows : []).slice(0, 5).map(row => (
+              <div key={row.entity_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>{row.entity_name}</span>
+                <Badge variant={riskTone(row.severity)}>{Math.round(row.score)}</Badge>
+              </div>
+            ))}
+            {!chokepointRiskQuery.isLoading && chokepointRows.length === 0 && <EmptyState title="No chokepoint score rows" detail="Run PortWatch collection and maritime risk scoring." compact />}
+          </Card>
+          <Card style={{ padding: '16px', minWidth: 0 }}>
+            <SectionHeader title="Disruption Propagation" sub="Likely downstream route impact" />
+            {(propagationRows.length ? propagationRows : []).slice(0, 4).map((row: DisruptionPropagationResponse) => (
+              <div key={row.id} style={{ padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{row.source_entity_name} → {row.target_entity_name}</span>
+                  <span className="mono-num" style={{ fontSize: 11 }}>{Math.round(row.confidence * 100)}%</span>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>{row.route_lane ?? row.explanation}</div>
+              </div>
+            ))}
+            {!propagationQuery.isLoading && propagationRows.length === 0 && <EmptyState title="No active propagation links" detail="Risk scores below configured propagation threshold." compact />}
+          </Card>
+          <Card style={{ padding: '16px', minWidth: 0 }}>
+            <SectionHeader title="Source Freshness" sub="External data state" />
+            {(freshnessRows.length ? freshnessRows : []).slice(0, 5).map(row => (
+              <div key={row.source} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                <span style={{ fontSize: 12 }}>{row.source}</span>
+                <Badge variant={row.freshness_status === 'fresh' ? 'success' : row.freshness_status === 'stale' ? 'danger' : 'warning'}>{row.freshness_status}</Badge>
+              </div>
+            ))}
+            {!freshnessQuery.isLoading && freshnessRows.length === 0 && <EmptyState title="No source freshness rows" detail="Collector status is unavailable until source runs are logged." compact />}
           </Card>
         </div>
 
@@ -204,23 +285,24 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader
               title="Latest Insights"
-              sub={liveInsights.length ? 'API narratives with AI badge when LLM text exists' : 'Demo fallback narratives are labeled'}
+              sub={liveInsights.length ? 'API narratives with AI badge when LLM text exists' : useDemoInsights ? 'Demo fallback narratives are labeled' : 'No live insight rows returned'}
               action={<button onClick={() => onNavigate?.('insights')} style={{ border: 0, background: 'transparent', cursor: 'pointer' }}><Badge variant="accent">Open Insights Hub</Badge></button>}
             />
-            {!insightsQuery.isLoading && liveInsights.length === 0 && <DataProvenance mode="demo" source="No live insight rows returned" />}
+            {!insightsQuery.isLoading && liveInsights.length === 0 && <DataProvenance mode={useDemoInsights ? 'demo' : 'empty'} source={useDemoInsights ? 'Explicit demo fallback enabled' : 'No live insight rows returned'} />}
             {insightsQuery.isLoading ? <SkeletonBlock height={160} lines={4} /> : insights.map((insight, i) => (
               <InsightRow key={`${insight.time}-${i}`} text={insight.text} category={insight.category} time={insight.time} aiGenerated={insight.aiGenerated ?? false} />
             ))}
+            {!insightsQuery.isLoading && insights.length === 0 && <EmptyState title="No live insights" detail="Run insight generation after collectors populate source and risk tables." compact />}
           </Card>
 
           <Card style={{ padding: '16px', minWidth: 0 }}>
-            <SectionHeader title="What Changed" sub="Operational deltas worth calling out in demo" />
+            <SectionHeader title="What Changed" sub="Operational deltas from live API rows." />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[
                 { label: 'BDI movement', value: bdiChange == null ? 'No live trend' : fmtPct(bdiChange), tone: bdiChange != null && bdiChange > 0 ? 'var(--success)' : 'var(--danger)' },
                 { label: 'FBX movement', value: fbxChange == null ? 'No live trend' : fmtPct(fbxChange), tone: fbxChange != null && fbxChange > 0 ? 'var(--warning)' : 'var(--success)' },
-                { label: 'High-pressure ports', value: congestionQuery.data?.length ? `${highPorts} flagged` : 'Demo overlay', tone: highPorts > 0 ? 'var(--warning)' : 'var(--text-primary)' },
-                { label: 'Latest sync', value: liveStats ? relativeTime(liveStats.generated_at) : 'Demo fallback', tone: stale ? 'var(--warning)' : 'var(--text-primary)' },
+                { label: 'High-pressure ports', value: congestionQuery.data?.length ? `${highPorts} flagged` : 'No live port rows', tone: highPorts > 0 ? 'var(--warning)' : 'var(--text-primary)' },
+                { label: 'Latest sync', value: liveStats ? relativeTime(liveStats.generated_at) : 'Unavailable', tone: stale ? 'var(--warning)' : 'var(--text-primary)' },
               ].map(row => (
                 <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                   <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{row.label}</span>
@@ -228,7 +310,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
                 </div>
               ))}
             </div>
-            {!statsQuery.isLoading && !liveStats && <EmptyState title="Overview endpoint returned no usable summary" detail="Dashboard is showing clearly labeled demo values for the first run." compact />}
+            {!statsQuery.isLoading && !liveStats && <EmptyState title="Overview endpoint returned no usable summary" detail="Summary metrics stay unavailable in normal mode until the backend returns real rows." compact />}
           </Card>
         </div>
       </div>

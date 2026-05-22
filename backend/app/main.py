@@ -16,9 +16,11 @@ from app.api.routes.health import router as health_router
 from app.api.routes.indices import router as indices_router
 from app.api.routes.insights import router as insights_router
 from app.api.routes.ports import router as ports_router
+from app.api.routes.risk import router as risk_router
 from app.api.routes.stats import router as stats_router
 from app.api.routes.story import router as story_router
 from app.api.routes.vessels import router as vessels_router
+from app.config import get_settings
 
 app = FastAPI(
     title="GlobalSupplyWatch API",
@@ -29,6 +31,7 @@ app = FastAPI(
         {"name": "indices", "description": "Freight and macro index time series."},
         {"name": "vessels", "description": "AIS vessel snapshots and tracks."},
         {"name": "ports", "description": "Port reference and congestion data."},
+        {"name": "risk", "description": "PortWatch-first maritime risk intelligence."},
         {"name": "chokepoints", "description": "Chokepoint reference and risk timelines."},
         {"name": "insights", "description": "Anomalies, correlations, and narratives."},
         {"name": "story", "description": "LLM-assisted two-entity relationship analysis."},
@@ -38,7 +41,8 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))
-app.add_middleware(SlowAPIMiddleware)
+if get_settings().rate_limit_enabled:
+    app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +56,7 @@ app.include_router(health_router, prefix="/api")
 app.include_router(indices_router, prefix="/api")
 app.include_router(vessels_router, prefix="/api")
 app.include_router(ports_router, prefix="/api")
+app.include_router(risk_router, prefix="/api")
 app.include_router(chokepoints_router, prefix="/api")
 app.include_router(insights_router, prefix="/api")
 app.include_router(story_router, prefix="/api")

@@ -7,8 +7,36 @@ import type {
   PortResponse,
 } from './client'
 
-export type DataMode = 'live' | 'demo' | 'empty' | 'error' | 'loading'
+export type DataMode = 'live' | 'demo' | 'empty' | 'stale' | 'disabled' | 'error' | 'loading'
 export type Severity = 'low' | 'medium' | 'high'
+
+export interface RowStateInput {
+  loading?: boolean
+  error?: unknown
+  disabled?: boolean
+  stale?: boolean
+  rowCount: number
+  demoEnabled?: boolean
+}
+
+export function rowDataMode({
+  loading = false,
+  error,
+  disabled = false,
+  stale = false,
+  rowCount,
+  demoEnabled = false,
+}: RowStateInput): DataMode {
+  if (disabled) return 'disabled'
+  if (loading) return 'loading'
+  if (error) return demoEnabled ? 'demo' : 'error'
+  if (rowCount > 0) return stale ? 'stale' : 'live'
+  return demoEnabled ? 'demo' : 'empty'
+}
+
+export function shouldUseDemoRows({ loading = false, error, disabled = false, rowCount, demoEnabled = false }: RowStateInput): boolean {
+  return Boolean(demoEnabled && !loading && !disabled && (Boolean(error) || rowCount === 0))
+}
 
 export function relativeTime(iso?: string | null): string {
   if (!iso) return 'unknown'

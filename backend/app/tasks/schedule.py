@@ -27,6 +27,10 @@ beat_schedule = {
         "task": "collect_openmeteo",
         "schedule": crontab(hour="*/6", minute=10),
     },
+    "portwatch-daily": {
+        "task": "collect_portwatch",
+        "schedule": crontab(hour=1, minute=20),
+    },
     "compute-port-congestion-hourly": {
         "task": "compute_port_congestion",
         "schedule": crontab(minute=15),
@@ -34,6 +38,10 @@ beat_schedule = {
     "compute-chokepoint-status-hourly": {
         "task": "compute_chokepoint_status",
         "schedule": crontab(minute=20),
+    },
+    "compute-maritime-risk-hourly": {
+        "task": "compute_maritime_risk",
+        "schedule": crontab(minute=25),
     },
     "detect-anomalies-hourly": {
         "task": "detect_anomalies",
@@ -50,5 +58,9 @@ beat_schedule = {
     "enrich-top-insights-hourly": {
         "task": "enrich_top_insights",
         "schedule": crontab(minute=50),
+    },
+    "enrich-watchlist-daily": {
+        "task": "enrich_watchlist",
+        "schedule": crontab(hour=6, minute=30),
     },
 }

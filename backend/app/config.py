@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     fred_api_key: str | None = None
     un_comtrade_api_key: str | None = None
     world_bank_api_key: str | None = None
+    portwatch_ports_url: str = (
+        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services/"
+        "Daily_Ports_Data/FeatureServer/0/query"
+    )
+    portwatch_chokepoints_url: str = (
+        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services/"
+        "Daily_Chokepoints_Data/FeatureServer/0/query"
+    )
     scraper_user_agent: str = Field(
         default="GlobalSupplyWatch/0.1 academic project contact@example.com"
     )
@@ -39,8 +47,11 @@ class Settings(BaseSettings):
         "qwen3.6-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash,qwen3.5-flash-2026-02-23"
     )
     llm_enabled: bool = True
+    rate_limit_enabled: bool = False
     llm_timeout_fast: int = 30
     llm_timeout_reasoning: int = 60
+    enrichment_provider_enabled: bool = False
+    backend_demo_fallback_enabled: bool = False
 
 
 @lru_cache(maxsize=1)

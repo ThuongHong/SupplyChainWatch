@@ -187,6 +187,73 @@ export interface InsightResponse {
   narrative_generated_at?: string | null;
   metrics?: Record<string, unknown> | null;
   priority: number;
+  event_type?: string | null;
+  confidence?: number | null;
+  affected_entities?: Array<Record<string, unknown>> | null;
+  source_metrics?: Record<string, unknown> | null;
+  attention_level?: string | null;
+}
+
+export interface RiskScoreResponse {
+  entity_id: string;
+  entity_name: string;
+  entity_type: "port" | "chokepoint" | "region";
+  score: number;
+  severity: string;
+  component_scores: Record<string, unknown>;
+  missing_components?: string[] | null;
+  reasons?: string[] | null;
+  source_metrics?: Record<string, unknown> | null;
+  freshness_status: string;
+  as_of: string;
+  lat?: number | null;
+  lon?: number | null;
+}
+
+export interface DataFreshnessResponse {
+  source: string;
+  latest_observed_at?: string | null;
+  latest_collected_at?: string | null;
+  freshness_status: string;
+  rows: number;
+}
+
+export interface DisruptionPropagationResponse {
+  id: number;
+  source_entity_type: string;
+  source_entity_id: string;
+  source_entity_name: string;
+  target_entity_type: string;
+  target_entity_id: string;
+  target_entity_name: string;
+  route_lane?: string | null;
+  severity: string;
+  confidence: number;
+  explanation: string;
+  source_metrics?: Record<string, unknown> | null;
+  started_at: string;
+  updated_at: string;
+  status: string;
+}
+
+export interface VesselWatchlistResponse {
+  mmsi: number;
+  reason: string;
+  source_rule: string;
+  priority: number;
+  active: boolean;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  expires_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface VesselEtaDriftResponse {
+  mmsi: number;
+  eta_drift_minutes?: number | null;
+  confidence: number;
+  entity_id?: string | null;
+  reasons: string[];
 }
 
 export type StoryEntityType = "index" | "port" | "chokepoint";
@@ -281,4 +348,25 @@ export const apiClient = {
   correlations: (indices: string, days = 180, init?: RequestInit) =>
     request<CorrelationCell[]>(`/api/correlations${queryString({ indices, days })}`, init),
   overviewStats: (init?: RequestInit) => request<OverviewStats>("/api/stats/overview", init),
+  globalPortRisk: (limit = 25, init?: RequestInit) =>
+    request<RiskScoreResponse[]>(`/api/risk/ports${queryString({ limit })}`, init),
+  congestionHeatmap: (init?: RequestInit) =>
+    request<RiskScoreResponse[]>("/api/risk/heatmap", init),
+  chokepointStress: (limit = 25, init?: RequestInit) =>
+    request<RiskScoreResponse[]>(`/api/risk/chokepoints${queryString({ limit })}`, init),
+  disruptionPropagation: (init?: RequestInit) =>
+    request<DisruptionPropagationResponse[]>("/api/risk/propagation", init),
+  dataFreshness: (init?: RequestInit) =>
+    request<DataFreshnessResponse[]>("/api/risk/freshness", init),
+  vesselWatchlist: (init?: RequestInit) =>
+    request<VesselWatchlistResponse[]>("/api/risk/watchlist", init),
+  watchedVesselPositions: (mmsi: number, limit = 200, init?: RequestInit) =>
+    request<VesselSnapshotItem[]>(
+      `/api/risk/watchlist/${mmsi}/positions${queryString({ limit })}`,
+      init,
+    ),
+  watchedVesselAnomalies: (mmsi: number, init?: RequestInit) =>
+    request<AnomalyResponse[]>(`/api/risk/watchlist/${mmsi}/anomalies`, init),
+  watchedVesselEtaDrift: (mmsi: number, init?: RequestInit) =>
+    request<VesselEtaDriftResponse>(`/api/risk/watchlist/${mmsi}/eta-drift`, init),
 };
