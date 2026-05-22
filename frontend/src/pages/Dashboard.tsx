@@ -19,9 +19,11 @@ import { MOCK, fmtNum, fmtPct } from '../data/mock'
 import {
   apiClient,
   type DisruptionPropagationResponse,
+  type EntityRiskForecastResponse,
   type InsightResponse,
   type OverviewStats,
   type RiskScoreResponse,
+  type RiskStoryEventResponse,
 } from '../api/client'
 import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
@@ -121,11 +123,6 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
 
   const bdi = indexQueries[0].data ?? []
   const fbx = indexQueries[1].data ?? []
-  const liveStats = statsQuery.data ?? null
-  const apiError = portRiskQuery.error ?? chokepointRiskQuery.error ?? statsQuery.error ?? insightsQuery.error ?? congestionQuery.error ?? anomaliesQuery.error ?? indexQueries.find(q => q.error)?.error
-  const stale = isStale(liveStats?.generated_at, 6)
-  const highAnomalies = activeHighAnomalies(anomaliesQuery.data ?? [])
-  const risk = riskFromStats(liveStats, highAnomalies)
   const portRiskRows = portRiskQuery.data ?? []
   const chokepointRows = chokepointRiskQuery.data ?? []
   const propagationRows = propagationQuery.data ?? []
@@ -133,6 +130,23 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
   const watchlistRows = watchlistQuery.data ?? []
   const topPort = portRiskRows[0]
   const topChokepoint = chokepointRows[0]
+  const riskStoriesQuery = useQuery({
+    queryKey: queryKeys.riskStories(topPort?.entity_id, 180, 5),
+    queryFn: ({ signal }) => apiClient.riskStories({ entity_id: topPort?.entity_id, days: 180, limit: 5 }, { signal }),
+    enabled: Boolean(topPort),
+  })
+  const riskForecastQuery = useQuery({
+    queryKey: topPort ? queryKeys.riskEntityForecast(topPort.entity_id) : ['risk', 'forecast', 'no-entity'],
+    queryFn: ({ signal }) => apiClient.riskEntityForecast(topPort!.entity_id, { signal }),
+    enabled: Boolean(topPort),
+  })
+  const liveStats = statsQuery.data ?? null
+  const apiError = portRiskQuery.error ?? chokepointRiskQuery.error ?? statsQuery.error ?? insightsQuery.error ?? congestionQuery.error ?? anomaliesQuery.error ?? riskStoriesQuery.error ?? riskForecastQuery.error ?? indexQueries.find(q => q.error)?.error
+  const stale = isStale(liveStats?.generated_at, 6)
+  const highAnomalies = activeHighAnomalies(anomaliesQuery.data ?? [])
+  const risk = riskFromStats(liveStats, highAnomalies)
+  const riskStoryRows = riskStoriesQuery.data ?? []
+  const riskForecast = riskForecastQuery.data as EntityRiskForecastResponse | undefined
   const derivedRiskLive = portRiskRows.length > 0 || chokepointRows.length > 0
   const summaryUnavailable = !liveStats && !derivedRiskLive
 
@@ -311,6 +325,43 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
               ))}
             </div>
             {!statsQuery.isLoading && !liveStats && <EmptyState title="Overview endpoint returned no usable summary" detail="Summary metrics stay unavailable in normal mode until the backend returns real rows." compact />}
+          </Card>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(280px, 2fr)', gap: 12 }}>
+          <Card style={{ padding: '16px', minWidth: 0 }}>
+            <SectionHeader
+              title="Risk Story Timeline"
+              sub={topPort ? `${topPort.entity_name} historical events` : 'No ranked port selected'}
+              action={<DataProvenance mode={rowDataMode({ loading: riskStoriesQuery.isLoading, error: riskStoriesQuery.error, rowCount: riskStoryRows.length, demoEnabled: false })} source="Real risk_story_events" />}
+            />
+            {riskStoriesQuery.isLoading ? <SkeletonBlock height={140} lines={4} /> : riskStoryRows.slice(0, 5).map((story: RiskStoryEventResponse) => (
+              <div key={story.event_key} style={{ padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{story.entity_name} · {story.event_type.replace(/_/g, ' ')}</span>
+                  <Badge variant={riskTone(story.severity)}>{Math.round(story.confidence * 100)}%</Badge>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>{story.narrative}</div>
+              </div>
+            ))}
+            {!riskStoriesQuery.isLoading && riskStoryRows.length === 0 && <EmptyState title="No live risk story events" detail="Backfill history and refresh story generation; normal mode never fabricates event rows." compact />}
+          </Card>
+
+          <Card style={{ padding: '16px', minWidth: 0 }}>
+            <SectionHeader
+              title="Risk Forecast"
+              sub={riskForecast?.data_sufficiency_status === 'sufficient' ? `${riskForecast.horizon_days}-day baseline` : 'Prediction needs enough real history'}
+              action={<DataProvenance mode={riskForecastQuery.isLoading ? 'loading' : riskForecast?.data_sufficiency_status === 'sufficient' ? 'live' : 'empty'} source="Real risk feature snapshots" />}
+            />
+            {riskForecastQuery.isLoading ? <SkeletonBlock height={120} lines={3} /> : riskForecast?.data_sufficiency_status === 'sufficient' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <MetricCard label="Forecast Confidence" value={`${Math.round(riskForecast.confidence * 100)}%`} tone={riskForecast.confidence >= 0.6 ? 'success' : 'warning'} />
+                <Sparkline data={riskForecast.predictions.map(point => Number(point.risk_score ?? 0))} color="var(--accent)" width={220} height={50} />
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Model: {riskForecast.model_name ?? 'baseline'} · train {riskForecast.train_window_start ?? 'n/a'} to {riskForecast.train_window_end ?? 'n/a'}</div>
+              </div>
+            ) : (
+              <EmptyState title="Forecast unavailable" detail={riskForecast?.unavailable_reason ?? 'Need enough historical feature snapshots before prediction.'} compact />
+            )}
           </Card>
         </div>
       </div>

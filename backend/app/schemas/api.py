@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -153,6 +153,87 @@ class DataFreshnessResponse(BaseModel):
     latest_collected_at: datetime | None = None
     freshness_status: str
     rows: int = 0
+
+
+class DataCoverageResponse(BaseModel):
+    source: str
+    entity_type: str
+    entity_id: str
+    entity_name: str
+    first_observed_at: datetime | None = None
+    latest_observed_at: datetime | None = None
+    observed_rows: int = 0
+    expected_days: int = 0
+    missing_days: int = 0
+    freshness_status: str
+    last_collection_status: str | None = None
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class RiskFeatureSnapshotResponse(BaseModel):
+    snapshot_date: datetime | date
+    entity_type: str
+    entity_id: str
+    entity_name: str
+    risk_score: float | None = None
+    severity: str | None = None
+    feature_values: dict[str, Any]
+    baseline_values: dict[str, Any]
+    z_scores: dict[str, Any]
+    deltas: dict[str, Any]
+    missing_features: list[str] | None = None
+    source_freshness: dict[str, Any] | None = None
+    driver_metadata: dict[str, Any] | None = None
+    feature_schema_version: str
+
+
+class RiskEntityHistoryResponse(BaseModel):
+    entity_id: str
+    coverage: list[DataCoverageResponse]
+    snapshots: list[RiskFeatureSnapshotResponse]
+    data_sufficiency: dict[str, Any]
+
+
+class RiskStoryEventResponse(BaseModel):
+    event_key: str
+    event_time: datetime
+    entity_type: str
+    entity_id: str
+    entity_name: str
+    event_type: str
+    severity: str
+    metric: str
+    observed: float | None = None
+    expected: float | None = None
+    z_score: float | None = None
+    percent_change: float | None = None
+    drivers: dict[str, Any] | None = None
+    source_metrics: dict[str, Any] | None = None
+    narrative: str
+    confidence: float
+    attention_level: str
+    data_sufficiency: dict[str, Any] | None = None
+
+
+class EntityRiskForecastResponse(BaseModel):
+    forecast_key: str | None = None
+    created_at: datetime | None = None
+    entity_type: str | None = None
+    entity_id: str
+    entity_name: str | None = None
+    horizon_days: int
+    predictions: list[dict[str, Any]]
+    confidence: float
+    train_window_start: date | None = None
+    train_window_end: date | None = None
+    data_sufficiency_status: str
+    unavailable_reason: str | None = None
+    key_drivers: list[str] | None = None
+    metrics: dict[str, Any]
+    model_name: str | None = None
+    model_params: dict[str, Any] | None = None
+    feature_schema_version: str | None = None
 
 
 class DisruptionPropagationResponse(BaseModel):

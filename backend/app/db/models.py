@@ -162,6 +162,97 @@ class PortRiskScore(Base):
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DataCoverage(Base):
+    __tablename__ = "data_coverage"
+
+    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_name: Mapped[str] = mapped_column(Text)
+    first_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    observed_rows: Mapped[int] = mapped_column(Integer, default=0)
+    expected_days: Mapped[int] = mapped_column(Integer, default=0)
+    missing_days: Mapped[int] = mapped_column(Integer, default=0)
+    freshness_status: Mapped[str] = mapped_column(Text)
+    last_collection_status: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+
+
+class RiskFeatureSnapshot(Base):
+    __tablename__ = "risk_feature_snapshots"
+
+    snapshot_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    entity_name: Mapped[str] = mapped_column(Text)
+    risk_score: Mapped[float | None] = mapped_column(REAL)
+    severity: Mapped[str | None] = mapped_column(Text)
+    feature_values: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    baseline_values: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    z_scores: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    deltas: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    missing_features: Mapped[list[str] | None] = mapped_column(JSONB)
+    source_freshness: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    driver_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    feature_schema_version: Mapped[str] = mapped_column(Text, default="risk_features_v1")
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RiskStoryEvent(Base):
+    __tablename__ = "risk_story_events"
+
+    event_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    entity_type: Mapped[str] = mapped_column(Text)
+    entity_id: Mapped[str] = mapped_column(Text)
+    entity_name: Mapped[str] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(Text)
+    metric: Mapped[str] = mapped_column(Text)
+    observed: Mapped[float | None] = mapped_column(Float)
+    expected: Mapped[float | None] = mapped_column(Float)
+    z_score: Mapped[float | None] = mapped_column(Float)
+    percent_change: Mapped[float | None] = mapped_column(Float)
+    drivers: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    source_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    narrative: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(REAL)
+    attention_level: Mapped[str] = mapped_column(Text)
+    data_sufficiency: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class EntityRiskForecast(Base):
+    __tablename__ = "entity_risk_forecasts"
+
+    forecast_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    entity_type: Mapped[str] = mapped_column(Text)
+    entity_id: Mapped[str] = mapped_column(Text)
+    entity_name: Mapped[str] = mapped_column(Text)
+    horizon_days: Mapped[int] = mapped_column(Integer)
+    predictions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    confidence: Mapped[float] = mapped_column(REAL)
+    train_window_start: Mapped[date | None] = mapped_column(Date)
+    train_window_end: Mapped[date | None] = mapped_column(Date)
+    data_sufficiency_status: Mapped[str] = mapped_column(Text)
+    unavailable_reason: Mapped[str | None] = mapped_column(Text)
+    key_drivers: Mapped[list[str] | None] = mapped_column(JSONB)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    model_name: Mapped[str] = mapped_column(Text)
+    model_params: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    feature_schema_version: Mapped[str] = mapped_column(Text, default="risk_features_v1")
+
+
 class ChokepointRiskScore(Base):
     __tablename__ = "chokepoint_risk_scores"
 

@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { apiClient, type PortCongestionResponse } from '../api/client'
+import {
+  apiClient,
+  type DataCoverageResponse,
+  type PortCongestionResponse,
+  type RiskEntityHistoryResponse,
+} from '../api/client'
 import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
 import {
@@ -79,6 +84,10 @@ function timelineValues(rows: PortCongestionResponse[], fallbackSeed: number, de
   return Array.from({ length: 14 }, (_, i) => Math.max(8, Math.round(35 + Math.sin((i + fallbackSeed) / 2) * 12 + fallbackSeed)))
 }
 
+function riskEntityId(port: PortViewModel): string | null {
+  return port.locode ? `port-${port.locode.toLowerCase()}` : null
+}
+
 const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => void }> = ({ port, demo, onClick }) => {
   const row = port.congestion
   const sparkData = demo ? timelineValues([], port.id, true) : []
@@ -118,12 +127,16 @@ const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => vo
 const PortDetail: React.FC<{
   port: PortViewModel
   timeline: PortCongestionResponse[]
+  history?: RiskEntityHistoryResponse
+  coverage: DataCoverageResponse[]
   loading: boolean
   demo: boolean
   onClose: () => void
   onNavigate?: (page: PageId) => void
-}> = ({ port, timeline, loading, demo, onClose, onNavigate }) => {
+}> = ({ port, timeline, history, coverage, loading, demo, onClose, onNavigate }) => {
   const values = timelineValues(timeline, port.id, demo)
+  const riskHistoryValues = history?.snapshots.map(row => Number(row.risk_score ?? 0)).filter(Number.isFinite) ?? []
+  const insufficientHistory = history?.data_sufficiency?.status === 'insufficient_history'
   const min = values.length ? Math.min(...values) : 0
   const max = values.length ? Math.max(...values) : 1
   const range = max - min || 1
@@ -166,6 +179,19 @@ const PortDetail: React.FC<{
           )}
         </Card>
         <Card style={{ padding: 14 }}>
+          <SectionHeader
+            title="Risk History"
+            sub={insufficientHistory ? 'Insufficient history' : `${riskHistoryValues.length} feature snapshots`}
+            action={<DataProvenance mode={history ? (riskHistoryValues.length ? 'live' : 'empty') : 'empty'} source="Real risk feature snapshots" />}
+          />
+          {riskHistoryValues.length > 1 ? (
+            <Sparkline data={riskHistoryValues} color="var(--accent)" width={220} height={48} />
+          ) : (
+            <EmptyState title="No risk history rows" detail="Run historical PortWatch backfill and feature refresh for this port." compact />
+          )}
+          {insufficientHistory && <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 8 }}>Insufficient history for storytelling or forecast. Coverage gaps: {coverage.reduce((sum, row) => sum + row.missing_days, 0)} days.</div>}
+        </Card>
+        <Card style={{ padding: 14 }}>
           <SectionHeader title="Why This Matters" sub="Operational interpretation" />
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.65 }}>
             {port.severity === 'high'
@@ -206,11 +232,22 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
     demoEnabled: ENABLE_DEMO_FALLBACK,
   })
   const ports = usingDemo ? demoPorts() : livePorts
+  const selectedRiskEntityId = selectedPort ? riskEntityId(selectedPort) : null
   const timelineQuery = useQuery({
     queryKey: selectedPort ? queryKeys.portTimeline(selectedPort.id, 30) : ['ports', 'no-selection'],
     queryFn: ({ signal }) => apiClient.portTimeline(selectedPort!.id, 30, { signal }),
     enabled: Boolean(selectedPort && !usingDemo),
     retry: false,
+  })
+  const riskCoverageQuery = useQuery({
+    queryKey: queryKeys.riskCoverage(selectedRiskEntityId ?? undefined),
+    queryFn: ({ signal }) => apiClient.riskCoverage(selectedRiskEntityId ?? undefined, { signal }),
+    enabled: Boolean(selectedRiskEntityId && !usingDemo),
+  })
+  const riskEntityHistoryQuery = useQuery({
+    queryKey: selectedRiskEntityId ? queryKeys.riskEntityHistory(selectedRiskEntityId, 180) : ['risk', 'history', 'no-selection'],
+    queryFn: ({ signal }) => apiClient.riskEntityHistory(selectedRiskEntityId!, 180, { signal }),
+    enabled: Boolean(selectedRiskEntityId && !usingDemo),
   })
   const regions = useMemo(() => ['All', ...Array.from(new Set(ports.map(port => port.region).filter(Boolean) as string[])).sort()], [ports])
   const filtered = ports.filter(port =>
@@ -286,7 +323,9 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
           <PortDetail
             port={selectedPort}
             timeline={timelineQuery.data ?? []}
-            loading={timelineQuery.isLoading}
+            history={riskEntityHistoryQuery.data}
+            coverage={riskCoverageQuery.data ?? []}
+            loading={timelineQuery.isLoading || riskEntityHistoryQuery.isLoading}
             demo={usingDemo}
             onClose={() => setSelectedPort(null)}
             onNavigate={onNavigate}

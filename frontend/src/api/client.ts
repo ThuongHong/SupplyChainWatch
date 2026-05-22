@@ -218,6 +218,87 @@ export interface DataFreshnessResponse {
   rows: number;
 }
 
+export interface DataCoverageResponse {
+  source: string;
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  first_observed_at?: string | null;
+  latest_observed_at?: string | null;
+  observed_rows: number;
+  expected_days: number;
+  missing_days: number;
+  freshness_status: string;
+  last_collection_status?: string | null;
+  updated_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface RiskFeatureSnapshotResponse {
+  snapshot_date: string;
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  risk_score?: number | null;
+  severity?: string | null;
+  feature_values: Record<string, unknown>;
+  baseline_values: Record<string, unknown>;
+  z_scores: Record<string, unknown>;
+  deltas: Record<string, unknown>;
+  missing_features?: string[] | null;
+  source_freshness?: Record<string, unknown> | null;
+  driver_metadata?: Record<string, unknown> | null;
+  feature_schema_version: string;
+}
+
+export interface RiskEntityHistoryResponse {
+  entity_id: string;
+  coverage: DataCoverageResponse[];
+  snapshots: RiskFeatureSnapshotResponse[];
+  data_sufficiency: Record<string, unknown>;
+}
+
+export interface RiskStoryEventResponse {
+  event_key: string;
+  event_time: string;
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  event_type: string;
+  severity: string;
+  metric: string;
+  observed?: number | null;
+  expected?: number | null;
+  z_score?: number | null;
+  percent_change?: number | null;
+  drivers?: Record<string, unknown> | null;
+  source_metrics?: Record<string, unknown> | null;
+  narrative: string;
+  confidence: number;
+  attention_level: string;
+  data_sufficiency?: Record<string, unknown> | null;
+}
+
+export interface EntityRiskForecastResponse {
+  forecast_key?: string | null;
+  created_at?: string | null;
+  entity_type?: string | null;
+  entity_id: string;
+  entity_name?: string | null;
+  horizon_days: number;
+  predictions: Array<Record<string, unknown>>;
+  confidence: number;
+  train_window_start?: string | null;
+  train_window_end?: string | null;
+  data_sufficiency_status: string;
+  unavailable_reason?: string | null;
+  key_drivers?: string[] | null;
+  metrics: Record<string, unknown>;
+  model_name?: string | null;
+  model_params?: Record<string, unknown> | null;
+  feature_schema_version?: string | null;
+}
+
 export interface DisruptionPropagationResponse {
   id: number;
   source_entity_type: string;
@@ -358,6 +439,20 @@ export const apiClient = {
     request<DisruptionPropagationResponse[]>("/api/risk/propagation", init),
   dataFreshness: (init?: RequestInit) =>
     request<DataFreshnessResponse[]>("/api/risk/freshness", init),
+  riskCoverage: (entityId?: string, init?: RequestInit) =>
+    request<DataCoverageResponse[]>(`/api/risk/coverage${queryString({ entity_id: entityId })}`, init),
+  riskEntityHistory: (entityId: string, days = 180, init?: RequestInit) =>
+    request<RiskEntityHistoryResponse>(
+      `/api/risk/entities/${encodeURIComponent(entityId)}/history${queryString({ days })}`,
+      init,
+    ),
+  riskStories: (params: { entity_id?: string; days?: number; limit?: number } = {}, init?: RequestInit) =>
+    request<RiskStoryEventResponse[]>(`/api/risk/stories${queryString(params)}`, init),
+  riskEntityForecast: (entityId: string, init?: RequestInit) =>
+    request<EntityRiskForecastResponse>(
+      `/api/risk/entities/${encodeURIComponent(entityId)}/forecast`,
+      init,
+    ),
   vesselWatchlist: (init?: RequestInit) =>
     request<VesselWatchlistResponse[]>("/api/risk/watchlist", init),
   watchedVesselPositions: (mmsi: number, limit = 200, init?: RequestInit) =>

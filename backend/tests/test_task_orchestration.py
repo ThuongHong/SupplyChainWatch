@@ -66,6 +66,26 @@ def test_risk_derivation_refreshes_downstream_outputs(monkeypatch: pytest.Monkey
         "generate_insights_job",
         lambda received: calls.append("insights") or 3,
     )
+    monkeypatch.setattr(
+        jobs,
+        "compute_data_coverage",
+        lambda received: calls.append("coverage") or 5,
+    )
+    monkeypatch.setattr(
+        jobs,
+        "build_risk_feature_snapshots",
+        lambda received: calls.append("features") or 6,
+    )
+    monkeypatch.setattr(
+        jobs,
+        "generate_risk_story_events",
+        lambda received: calls.append("stories") or 7,
+    )
+    monkeypatch.setattr(
+        jobs,
+        "generate_entity_risk_forecasts",
+        lambda received: calls.append("risk_forecasts") or 8,
+    )
 
     result = jobs._run_risk_derivation()
 
@@ -74,8 +94,21 @@ def test_risk_derivation_refreshes_downstream_outputs(monkeypatch: pytest.Monkey
         "propagation_rows": 1,
         "watchlist_rows": 4,
         "insight_rows": 3,
+        "coverage_rows": 5,
+        "feature_rows": 6,
+        "story_rows": 7,
+        "forecast_rows": 8,
     }
-    assert calls == ["risk", "propagation", "watchlist", "insights"]
+    assert calls == [
+        "risk",
+        "propagation",
+        "watchlist",
+        "insights",
+        "coverage",
+        "features",
+        "stories",
+        "risk_forecasts",
+    ]
 
 
 def test_risk_derivation_skips_downstream_outputs_when_no_risk_rows(
@@ -107,6 +140,26 @@ def test_risk_derivation_skips_downstream_outputs_when_no_risk_rows(
         "generate_insights_job",
         lambda received: pytest.fail("insights should not run"),
     )
+    monkeypatch.setattr(
+        jobs,
+        "compute_data_coverage",
+        lambda received: pytest.fail("coverage should not run"),
+    )
+    monkeypatch.setattr(
+        jobs,
+        "build_risk_feature_snapshots",
+        lambda received: pytest.fail("features should not run"),
+    )
+    monkeypatch.setattr(
+        jobs,
+        "generate_risk_story_events",
+        lambda received: pytest.fail("stories should not run"),
+    )
+    monkeypatch.setattr(
+        jobs,
+        "generate_entity_risk_forecasts",
+        lambda received: pytest.fail("risk forecasts should not run"),
+    )
 
     result = jobs._run_risk_derivation()
 
@@ -115,6 +168,10 @@ def test_risk_derivation_skips_downstream_outputs_when_no_risk_rows(
         "propagation_rows": 0,
         "watchlist_rows": 0,
         "insight_rows": 0,
+        "coverage_rows": 0,
+        "feature_rows": 0,
+        "story_rows": 0,
+        "forecast_rows": 0,
     }
 
 

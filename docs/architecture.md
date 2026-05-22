@@ -56,6 +56,10 @@ React dashboard
 | `vessel_watchlist` | Active selective AIS monitoring set. |
 | `vessel_enrichment_cache` | TTL vessel enrichment snapshots and disabled-provider state. |
 | `disruption_propagation` | Downstream impact links from stressed chokepoints to ports/lanes. |
+| `data_coverage` | Per-source/entity history depth, gaps, freshness, and latest collection status. |
+| `risk_feature_snapshots` | Daily entity features for baselines, anomalies, stories, and forecasts. |
+| `risk_story_events` | Structured real-data events used for historical risk storytelling. |
+| `entity_risk_forecasts` | Short-horizon port/chokepoint risk forecasts with confidence and sufficiency metadata. |
 | `vessel_positions` | AIS vessel positions, indexed spatially and filtered by watchlist/risk area. |
 | `freight_indices` | BDI/FBX/WCI/FRED-style index values. |
 | `port_congestion` | Computed vessel counts around ports. |
@@ -74,7 +78,7 @@ The frontend uses the following groups:
 - Vessels: `/api/vessels/snapshot`, `/api/vessels/{mmsi}`
 - Ports: `/api/ports`, `/api/ports/congestion`, `/api/ports/{id}/timeline`
 - Chokepoints: `/api/chokepoints`, `/api/chokepoints/{id}/timeline`
-- Maritime risk: `/api/risk/ports`, `/api/risk/chokepoints`, `/api/risk/heatmap`, `/api/risk/propagation`, `/api/risk/freshness`, `/api/risk/watchlist`
+- Maritime risk: `/api/risk/ports`, `/api/risk/chokepoints`, `/api/risk/heatmap`, `/api/risk/propagation`, `/api/risk/freshness`, `/api/risk/coverage`, `/api/risk/entities/{entity_id}/history`, `/api/risk/stories`, `/api/risk/entities/{entity_id}/forecast`, `/api/risk/watchlist`
 - Insights: `/api/anomalies`, `/api/insights/latest`, `/api/correlations`
 - Story Mode: `POST /api/story/analyze`
 - Overview: `/api/stats/overview`
@@ -105,4 +109,13 @@ Real mode is the normal runtime path. Backend collectors should insert source ro
 collectors or documented manual backfill, and frontend pages should not substitute local mock rows
 unless demo mode is explicitly enabled. Source readiness is diagnosed from `collection_log` plus
 latest timestamps in `portwatch_metrics`, `port_risk_scores`, `chokepoint_risk_scores`,
+`data_coverage`, `risk_feature_snapshots`, `risk_story_events`, `entity_risk_forecasts`,
 `vessel_positions`, `freight_indices`, `anomalies`, and `insights`.
+
+Historical storytelling depends on source history, not current rows alone. Pipeline order is:
+
+1. Collect or backfill real PortWatch rows for monitored entities.
+2. Compute current risk scores.
+3. Refresh coverage and daily feature snapshots.
+4. Generate story events and baseline forecasts only when data sufficiency passes.
+5. Frontend renders empty or insufficient-history states when rows are absent. It does not create mock stories or forecasts in normal mode.

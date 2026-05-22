@@ -135,7 +135,12 @@ def test_portwatch_collector_unavailable_uses_demo_fallback() -> None:
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
-    records = PortWatchCollector(client=client, max_retries=1, use_demo_fallback=True, use_portid_filter=False).run()
+    records = PortWatchCollector(
+        client=client,
+        max_retries=1,
+        use_demo_fallback=True,
+        use_portid_filter=False,
+    ).run()
 
     assert records
     assert records[0].source == "portwatch_demo"

@@ -36,6 +36,14 @@ states instead of implicit mock rows. Demo fallback is opt-in through
 - Config: `PORTWATCH_PORTS_URL` and `PORTWATCH_CHOKEPOINTS_URL`.
 - Cache/fallback: risk API endpoints include cache headers and freshness metadata. Seed/demo PortWatch rows are only for explicit demo mode.
 - Note: PortWatch is source data for traffic/trade disruption. Congestion is derived by the risk layer and correlated with selective AIS, weather, freight, and fuel context.
+- Historical depth: `PORTWATCH_HISTORY_DAYS` controls the monitored-entity query window. Use at least 90 days for storytelling and at least 180 days when possible for forecast demos.
+- Backfill/refresh:
+
+```bash
+docker compose exec backend python -c "from app.tasks.jobs import collect_portwatch, refresh_historical_risk; print(collect_portwatch()); print(refresh_historical_risk())"
+```
+
+Historical runs are idempotent: PortWatch rows use stable natural keys, derived feature/story/forecast rows use deterministic keys, and reruns update existing records instead of fabricating duplicates.
 
 ## FRED
 
@@ -125,6 +133,14 @@ SELECT 'port_risk_scores', COUNT(*), MAX(time) FROM port_risk_scores
 UNION ALL
 SELECT 'chokepoint_risk_scores', COUNT(*), MAX(time) FROM chokepoint_risk_scores
 UNION ALL
+SELECT 'data_coverage', COUNT(*), MAX(updated_at) FROM data_coverage
+UNION ALL
+SELECT 'risk_feature_snapshots', COUNT(*), MAX(snapshot_date::timestamp) FROM risk_feature_snapshots
+UNION ALL
+SELECT 'risk_story_events', COUNT(*), MAX(event_time) FROM risk_story_events
+UNION ALL
+SELECT 'entity_risk_forecasts', COUNT(*), MAX(created_at) FROM entity_risk_forecasts
+UNION ALL
 SELECT 'vessel_positions', COUNT(*), MAX(time) FROM vessel_positions
 UNION ALL
 SELECT 'freight_indices', COUNT(*), MAX(time) FROM freight_indices
@@ -139,6 +155,13 @@ Docker Compose shortcut:
 ```bash
 docker compose exec postgres psql -U globalsupplywatch -d globalsupplywatch -c "<paste SQL>"
 ```
+
+## Storytelling And Forecast Confidence
+
+- `risk_feature_snapshots` are the prediction-ready daily rows. They contain risk score, rolling baseline, z-score, deltas, missing flags, freshness, and driver metadata.
+- `risk_story_events` are structured real-data events. Narratives explain observed change versus baseline; they do not claim causality without confidence and drivers.
+- `entity_risk_forecasts` use `risk_moving_average_baseline` until advanced models are added. Forecasts require enough feature history and acceptable gap rate.
+- `insufficient_history` means the system refused to forecast or tell a story from thin data. This is expected behavior in real mode and should not be replaced with demo rows.
 
 ## Selective vessel enrichment
 

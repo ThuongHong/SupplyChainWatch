@@ -28,32 +28,53 @@ class PortWatchFeatureAdapter:
                 ids = (
                     ["port1201", "port1188", "port2027", "port1114", "port664"]
                     if is_ports
-                    else ["chokepoint1", "chokepoint2", "chokepoint3", "chokepoint4", "chokepoint5", "chokepoint28"]
+                    else [
+                        "chokepoint1",
+                        "chokepoint2",
+                        "chokepoint3",
+                        "chokepoint4",
+                        "chokepoint5",
+                        "chokepoint28",
+                    ]
                 )
-                since_date = (datetime.now(UTC) - timedelta(days=90)).strftime("%Y-%m-%d")
+                history_days = max(1, int(getattr(self.collector, "history_days", 90)))
+                since_date = (datetime.now(UTC) - timedelta(days=history_days)).strftime("%Y-%m-%d")
                 ids_str = ", ".join(f"'{i}'" for i in ids)
                 where_clause = f"portid IN ({ids_str}) AND date >= '{since_date}'"
-                
-                payload = self.collector.request_json(
-                    "GET",
-                    url,
-                    params={
-                        "where": where_clause,
-                        "outFields": "*",
-                        "f": "json",
-                        "returnGeometry": "false",
-                        "resultRecordCount": FEATURE_PAGE_SIZE,
-                    },
-                )
-                features = payload.get("features", []) if isinstance(payload, dict) else []
-                if isinstance(features, list) and len(features) > 0:
-                    return [item for item in features if isinstance(item, dict)]
+
+                features = self._fetch_filtered_pages(url, where_clause)
+                if features:
+                    return features
 
         # Fallback to the original objectId-based query for backward compatibility and tests
         object_ids = self._recent_object_ids(url)
         if object_ids:
             return self._fetch_object_ids(url, object_ids)
         return self._fetch_first_page(url)
+
+    def _fetch_filtered_pages(self, url: str, where_clause: str) -> list[dict[str, Any]]:
+        features: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            payload = self.collector.request_json(
+                "GET",
+                url,
+                params={
+                    "where": where_clause,
+                    "outFields": "*",
+                    "f": "json",
+                    "returnGeometry": "false",
+                    "resultOffset": offset,
+                    "resultRecordCount": FEATURE_PAGE_SIZE,
+                },
+            )
+            page = payload.get("features", []) if isinstance(payload, dict) else []
+            if isinstance(page, list):
+                features.extend(item for item in page if isinstance(item, dict))
+            if not isinstance(payload, dict) or not payload.get("exceededTransferLimit"):
+                break
+            offset += FEATURE_PAGE_SIZE
+        return features
 
     def _recent_object_ids(self, url: str) -> list[int]:
         payload = self.collector.request_json(
@@ -117,11 +138,13 @@ class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
         *,
         use_demo_fallback: bool = False,
         use_portid_filter: bool = True,
+        history_days: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.use_demo_fallback = use_demo_fallback
         self.use_portid_filter = use_portid_filter
+        self.history_days = history_days or get_settings().portwatch_history_days
         self.adapter = PortWatchFeatureAdapter(self)
 
     def collect(self) -> list[dict[str, Any]]:
@@ -139,7 +162,7 @@ class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
                 raise
             for feature in features:
                 rows.extend(normalize_feature(feature, entity_hint=entity_hint, source=source))
-        
+
         if not rows:
             if self.use_demo_fallback:
                 return demo_portwatch_rows()
@@ -248,7 +271,7 @@ def _match_entity(name: str | None, source_id: str | None) -> Any | None:
     for candidate in candidates:
         if not candidate:
             continue
-        # Normalize string by converting to lowercase, replacing dashes with spaces, and collapsing spaces
+        # Normalize aliases with dash and whitespace variants.
         lowered = " ".join(str(candidate).lower().replace("-", " ").split())
         for alias, entity in PORTWATCH_ALIAS_TO_ENTITY.items():
             norm_alias = " ".join(alias.lower().replace("-", " ").split())

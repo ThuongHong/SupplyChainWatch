@@ -10,9 +10,13 @@ from app.api.routes.helpers import rows_to_dicts
 from app.db.session import get_async_db
 from app.schemas.api import (
     AnomalyResponse,
+    DataCoverageResponse,
     DataFreshnessResponse,
     DisruptionPropagationResponse,
+    EntityRiskForecastResponse,
+    RiskEntityHistoryResponse,
     RiskScoreResponse,
+    RiskStoryEventResponse,
     VesselEnrichmentResponse,
     VesselSnapshotItem,
     VesselWatchlistResponse,
@@ -195,6 +199,149 @@ async def data_freshness(
             ORDER BY source
             """))
     return rows_to_dicts(list(result.mappings().all()))
+
+
+@router.get("/coverage", response_model=list[DataCoverageResponse])
+async def risk_data_coverage(
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+    entity_id: str | None = None,
+) -> list[dict[str, object]]:
+    response.headers["Cache-Control"] = "public, max-age=60"
+    result = await db.execute(
+        text("""
+            SELECT source, entity_type, entity_id, entity_name, first_observed_at,
+                   latest_observed_at, observed_rows, expected_days, missing_days,
+                   freshness_status, last_collection_status, updated_at, metadata
+            FROM data_coverage
+            WHERE (CAST(:entity_id AS TEXT) IS NULL OR entity_id = :entity_id)
+            ORDER BY entity_type, entity_name, source
+            """),
+        {"entity_id": entity_id},
+    )
+    return rows_to_dicts(list(result.mappings().all()))
+
+
+@router.get("/entities/{entity_id}/history", response_model=RiskEntityHistoryResponse)
+async def risk_entity_history(
+    entity_id: str,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+    days: Annotated[int, Query(ge=1, le=730)] = 180,
+) -> dict[str, object]:
+    response.headers["Cache-Control"] = "public, max-age=60"
+    coverage_result = await db.execute(
+        text("""
+            SELECT source, entity_type, entity_id, entity_name, first_observed_at,
+                   latest_observed_at, observed_rows, expected_days, missing_days,
+                   freshness_status, last_collection_status, updated_at, metadata
+            FROM data_coverage
+            WHERE entity_id = :entity_id
+            ORDER BY source
+            """),
+        {"entity_id": entity_id},
+    )
+    snapshot_result = await db.execute(
+        text("""
+            SELECT snapshot_date, entity_type, entity_id, entity_name, risk_score,
+                   severity, feature_values, baseline_values, z_scores, deltas,
+                   missing_features, source_freshness, driver_metadata,
+                   feature_schema_version
+            FROM risk_feature_snapshots
+            WHERE entity_id = :entity_id
+              AND snapshot_date >= CURRENT_DATE - (:days * INTERVAL '1 day')
+            ORDER BY snapshot_date
+            """),
+        {"entity_id": entity_id, "days": days},
+    )
+    coverage = rows_to_dicts(list(coverage_result.mappings().all()))
+    snapshots = rows_to_dicts(list(snapshot_result.mappings().all()))
+    observed_days = len(snapshots)
+    return {
+        "entity_id": entity_id,
+        "coverage": coverage,
+        "snapshots": snapshots,
+        "data_sufficiency": {
+            "status": "sufficient" if observed_days >= 14 else "insufficient_history",
+            "observed_days": observed_days,
+            "minimum_days": 14,
+            "missing_days": sum(int(row.get("missing_days") or 0) for row in coverage),
+        },
+    }
+
+
+@router.get("/stories", response_model=list[RiskStoryEventResponse])
+async def risk_story_timeline(
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+    entity_id: str | None = None,
+    severity: str | None = None,
+    event_type: str | None = None,
+    days: Annotated[int, Query(ge=1, le=730)] = 180,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[dict[str, object]]:
+    response.headers["Cache-Control"] = "public, max-age=60"
+    result = await db.execute(
+        text("""
+            SELECT event_key, event_time, entity_type, entity_id, entity_name,
+                   event_type, severity, metric, observed, expected, z_score,
+                   percent_change, drivers, source_metrics, narrative, confidence,
+                   attention_level, data_sufficiency
+            FROM risk_story_events
+            WHERE (CAST(:entity_id AS TEXT) IS NULL OR entity_id = :entity_id)
+              AND (CAST(:severity AS TEXT) IS NULL OR severity = :severity)
+              AND (CAST(:event_type AS TEXT) IS NULL OR event_type = :event_type)
+              AND event_time >= NOW() - (:days * INTERVAL '1 day')
+            ORDER BY event_time DESC
+            LIMIT :limit
+            """),
+        {
+            "entity_id": entity_id,
+            "severity": severity,
+            "event_type": event_type,
+            "days": days,
+            "limit": limit,
+        },
+    )
+    return rows_to_dicts(list(result.mappings().all()))
+
+
+@router.get("/entities/{entity_id}/forecast", response_model=EntityRiskForecastResponse)
+async def risk_entity_forecast(
+    entity_id: str,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> dict[str, object]:
+    response.headers["Cache-Control"] = "public, max-age=60"
+    result = await db.execute(
+        text("""
+            SELECT forecast_key, created_at, entity_type, entity_id, entity_name,
+                   horizon_days, predictions, confidence, train_window_start,
+                   train_window_end, data_sufficiency_status, unavailable_reason,
+                   key_drivers, metrics, model_name, model_params,
+                   feature_schema_version
+            FROM entity_risk_forecasts
+            WHERE entity_id = :entity_id
+            ORDER BY created_at DESC
+            LIMIT 1
+            """),
+        {"entity_id": entity_id},
+    )
+    row = result.mappings().first()
+    if row:
+        return dict(row)
+    return {
+        "forecast_key": None,
+        "entity_id": entity_id,
+        "entity_name": None,
+        "horizon_days": 0,
+        "predictions": [],
+        "confidence": 0,
+        "data_sufficiency_status": "insufficient_history",
+        "unavailable_reason": "no_forecast_rows",
+        "key_drivers": [],
+        "metrics": {},
+    }
 
 
 @router.get("/watchlist", response_model=list[VesselWatchlistResponse])

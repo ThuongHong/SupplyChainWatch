@@ -10,6 +10,12 @@ from app.analysis.chokepoint_status import (
     compute_chokepoint_status as compute_chokepoint_status_job,
 )
 from app.analysis.forecast import generate_forecasts
+from app.analysis.historical_risk import (
+    build_risk_feature_snapshots,
+    compute_data_coverage,
+    generate_entity_risk_forecasts,
+    generate_risk_story_events,
+)
 from app.analysis.insight_generator import generate_insights as generate_insights_job
 from app.analysis.maritime_risk import (
     compute_disruption_propagation,
@@ -87,7 +93,10 @@ def collect_openmeteo() -> int:
 def collect_portwatch() -> int:
     settings = get_settings()
     rows = _run_collector(
-        PortWatchCollector(use_demo_fallback=settings.backend_demo_fallback_enabled)
+        PortWatchCollector(
+            use_demo_fallback=settings.backend_demo_fallback_enabled,
+            history_days=getattr(settings, "portwatch_history_days", None),
+        )
     )
     if rows > 0:
         _run_risk_derivation()
@@ -156,6 +165,7 @@ def detect_anomalies() -> int:
 def generate_forecast() -> int:
     with SessionLocal() as db:
         created = generate_forecasts(db)
+        created += generate_entity_risk_forecasts(db)
         comment_recent_forecasts(db)
         return created
 
@@ -169,6 +179,21 @@ def generate_insights() -> int:
 @celery_app.task(name="compute_maritime_risk")
 def compute_maritime_risk() -> int:
     return sum(_run_risk_derivation().values())
+
+
+@celery_app.task(name="refresh_historical_risk")
+def refresh_historical_risk() -> dict[str, int]:
+    with SessionLocal() as db:
+        coverage_rows = compute_data_coverage(db)
+        feature_rows = build_risk_feature_snapshots(db)
+        story_rows = generate_risk_story_events(db)
+        forecast_rows = generate_entity_risk_forecasts(db)
+        return {
+            "coverage_rows": coverage_rows,
+            "feature_rows": feature_rows,
+            "story_rows": story_rows,
+            "forecast_rows": forecast_rows,
+        }
 
 
 @celery_app.task(name="enrich_top_insights")
@@ -198,15 +223,27 @@ def _run_risk_derivation() -> dict[str, int]:
         propagation_rows = 0
         watchlist_rows = 0
         insight_rows = 0
+        coverage_rows = 0
+        feature_rows = 0
+        story_rows = 0
+        forecast_rows = 0
         if risk_rows > 0:
             propagation_rows = compute_disruption_propagation(db)
             watchlist_rows = refresh_watchlist_from_risk(db)
             insight_rows = generate_insights_job(db)
+            coverage_rows = compute_data_coverage(db)
+            feature_rows = build_risk_feature_snapshots(db)
+            story_rows = generate_risk_story_events(db)
+            forecast_rows = generate_entity_risk_forecasts(db)
         return {
             "risk_rows": risk_rows,
             "propagation_rows": propagation_rows,
             "watchlist_rows": watchlist_rows,
             "insight_rows": insight_rows,
+            "coverage_rows": coverage_rows,
+            "feature_rows": feature_rows,
+            "story_rows": story_rows,
+            "forecast_rows": forecast_rows,
         }
 
 

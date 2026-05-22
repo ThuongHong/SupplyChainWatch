@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     llm_timeout_reasoning: int = 60
     enrichment_provider_enabled: bool = False
     backend_demo_fallback_enabled: bool = False
+    portwatch_history_days: int = 180
+    risk_story_min_history_days: int = 90
+    risk_forecast_min_history_days: int = 14
+    risk_story_z_threshold: float = 2.0
+    risk_story_percent_change_threshold: float = 35.0
+    risk_forecast_horizon_days: int = 14
+    risk_forecast_max_gap_rate: float = 0.35
 
 
 @lru_cache(maxsize=1)

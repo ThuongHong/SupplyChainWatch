@@ -26,6 +26,10 @@ def test_openapi_exposes_week2_routes() -> None:
     assert "/api/risk/ports" in paths
     assert "/api/risk/chokepoints" in paths
     assert "/api/risk/propagation" in paths
+    assert "/api/risk/coverage" in paths
+    assert "/api/risk/entities/{entity_id}/history" in paths
+    assert "/api/risk/stories" in paths
+    assert "/api/risk/entities/{entity_id}/forecast" in paths
     assert "/api/risk/watchlist" in paths
     assert "/api/risk/watchlist/{mmsi}/positions" in paths
     assert "/api/risk/watchlist/{mmsi}/enrichment" in paths
