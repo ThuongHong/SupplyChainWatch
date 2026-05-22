@@ -60,7 +60,7 @@ def test_portwatch_collector_success_logs_collection() -> None:
     db = sqlite_collection_session()
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
-    records = PortWatchCollector(client=client).run(db=db)
+    records = PortWatchCollector(client=client, use_portid_filter=False).run(db=db)
     log = db.query(CollectionLog).one()
 
     assert len(records) == 2
@@ -93,11 +93,40 @@ def test_portwatch_collector_fetches_recent_object_ids() -> None:
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
-    records = PortWatchCollector(client=client).run()
+    records = PortWatchCollector(client=client, use_portid_filter=False).run()
 
     assert records
     assert requested_ids
     assert requested_ids[0].startswith("6,7,8")
+
+
+def test_portwatch_collector_uses_portid_filter() -> None:
+    requested_params: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_params.append(dict(request.url.params))
+        payload = {
+            "features": [
+                {
+                    "attributes": {
+                        "portid": "port1201",
+                        "portname": "Singapore",
+                        "date": "2026-05-20",
+                        "portcalls": 120,
+                    }
+                }
+            ]
+        }
+        return httpx.Response(200, request=request, json=payload)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    records = PortWatchCollector(client=client, use_portid_filter=True).run()
+
+    assert records
+    assert len(requested_params) == 2
+    assert "portid IN" in requested_params[0]["where"]
+    assert "date >= " in requested_params[0]["where"]
 
 
 def test_portwatch_collector_unavailable_uses_demo_fallback() -> None:
@@ -106,7 +135,7 @@ def test_portwatch_collector_unavailable_uses_demo_fallback() -> None:
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
-    records = PortWatchCollector(client=client, max_retries=1, use_demo_fallback=True).run()
+    records = PortWatchCollector(client=client, max_retries=1, use_demo_fallback=True, use_portid_filter=False).run()
 
     assert records
     assert records[0].source == "portwatch_demo"

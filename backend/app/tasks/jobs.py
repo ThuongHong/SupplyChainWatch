@@ -286,7 +286,7 @@ def _persist_records(records: list[BaseModel], db: Any) -> None:
                 )
             )
         elif isinstance(record, PortWatchMetricRecord):
-            db.add(
+            db.merge(
                 PortWatchMetric(
                     observed_at=record.observed_at,
                     entity_type=record.entity_type,

@@ -20,12 +20,36 @@ class PortWatchFeatureAdapter:
         self.collector = collector
 
     def fetch_features(self, url: str) -> list[dict[str, Any]]:
-        """Fetch a bounded recent sample.
+        """Fetch recent data for monitored portwatch entities."""
+        if getattr(self.collector, "use_portid_filter", True):
+            is_ports = "Daily_Ports_Data" in url or "ports" in url.lower()
+            is_chokepoints = "Daily_Chokepoints_Data" in url or "chokepoint" in url.lower()
+            if is_ports or is_chokepoints:
+                ids = (
+                    ["port1201", "port1188", "port2027", "port1114", "port664"]
+                    if is_ports
+                    else ["chokepoint1", "chokepoint2", "chokepoint3", "chokepoint4", "chokepoint5", "chokepoint28"]
+                )
+                since_date = (datetime.now(UTC) - timedelta(days=90)).strftime("%Y-%m-%d")
+                ids_str = ", ".join(f"'{i}'" for i in ids)
+                where_clause = f"portid IN ({ids_str}) AND date >= '{since_date}'"
+                
+                payload = self.collector.request_json(
+                    "GET",
+                    url,
+                    params={
+                        "where": where_clause,
+                        "outFields": "*",
+                        "f": "json",
+                        "returnGeometry": "false",
+                        "resultRecordCount": FEATURE_PAGE_SIZE,
+                    },
+                )
+                features = payload.get("features", []) if isinstance(payload, dict) else []
+                if isinstance(features, list) and len(features) > 0:
+                    return [item for item in features if isinstance(item, dict)]
 
-        PortWatch layers contain multi-year archives. Querying `where=1=1`
-        page-by-page can take minutes, so collection samples the newest object
-        ids and leaves historical backfill to a separate job.
-        """
+        # Fallback to the original objectId-based query for backward compatibility and tests
         object_ids = self._recent_object_ids(url)
         if object_ids:
             return self._fetch_object_ids(url, object_ids)
@@ -88,9 +112,16 @@ class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
     record_model = PortWatchMetricRecord
     min_request_interval_seconds = 1
 
-    def __init__(self, *, use_demo_fallback: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        use_demo_fallback: bool = False,
+        use_portid_filter: bool = True,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.use_demo_fallback = use_demo_fallback
+        self.use_portid_filter = use_portid_filter
         self.adapter = PortWatchFeatureAdapter(self)
 
     def collect(self) -> list[dict[str, Any]]:
@@ -108,9 +139,36 @@ class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
                 raise
             for feature in features:
                 rows.extend(normalize_feature(feature, entity_hint=entity_hint, source=source))
-        if rows or not self.use_demo_fallback:
-            return rows
-        return demo_portwatch_rows()
+        
+        if not rows:
+            if self.use_demo_fallback:
+                return demo_portwatch_rows()
+            return []
+
+        # Aggregate duplicates (e.g., Shanghai Pudong and Yangshan both mapping to port-cnsha)
+        aggregated: dict[tuple[datetime, str, str, str, str], dict[str, Any]] = {}
+        for row in rows:
+            key = (
+                row["observed_at"],
+                row["entity_type"],
+                row["entity_id"],
+                row["metric_name"],
+                row["source"],
+            )
+            if key in aggregated:
+                aggregated[key]["metric_value"] += row["metric_value"]
+                if "source_entity_ids" not in aggregated[key]["metadata"]:
+                    aggregated[key]["metadata"]["source_entity_ids"] = [
+                        aggregated[key]["source_entity_id"]
+                    ]
+                if row["source_entity_id"] not in aggregated[key]["metadata"]["source_entity_ids"]:
+                    aggregated[key]["metadata"]["source_entity_ids"].append(row["source_entity_id"])
+            else:
+                row_copy = dict(row)
+                row_copy["metadata"] = dict(row_copy["metadata"])
+                aggregated[key] = row_copy
+
+        return list(aggregated.values())
 
 
 def normalize_feature(
@@ -190,11 +248,11 @@ def _match_entity(name: str | None, source_id: str | None) -> Any | None:
     for candidate in candidates:
         if not candidate:
             continue
-        lowered = str(candidate).strip().lower()
-        if lowered in PORTWATCH_ALIAS_TO_ENTITY:
-            return PORTWATCH_ALIAS_TO_ENTITY[lowered]
+        # Normalize string by converting to lowercase, replacing dashes with spaces, and collapsing spaces
+        lowered = " ".join(str(candidate).lower().replace("-", " ").split())
         for alias, entity in PORTWATCH_ALIAS_TO_ENTITY.items():
-            if alias in lowered:
+            norm_alias = " ".join(alias.lower().replace("-", " ").split())
+            if norm_alias in lowered or lowered == norm_alias:
                 return entity
     return None
 

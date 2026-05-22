@@ -74,7 +74,7 @@ PORTWATCH_ENTITIES: tuple[MonitoredEntity, ...] = (
         "Middle East",
         ("red sea", "bab-el-mandeb", "bab el mandeb"),
     ),
-    MonitoredEntity("region-black-sea", "Black Sea", "region", "Europe", ("black sea",)),
+    MonitoredEntity("region-black-sea", "Black Sea", "region", "Europe", ("black sea", "bosporus")),
 )
 
 
