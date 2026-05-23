@@ -52,8 +52,8 @@ describe('VesselMap selective drilldown', () => {
     expect(source).toMatch(/watchedVesselPositions/)
     expect(source).toMatch(/watchedVesselAnomalies/)
     expect(source).toMatch(/watchedVesselEtaDrift/)
-    expect(source).toMatch(/Selective Vessel Drilldown/)
-    expect(source).toMatch(/Watchlist AIS/)
+    expect(source).toMatch(/Monitored Port Traffic/)
+    expect(source).toMatch(/Monitored AIS/)
   })
 
   it('shows ETA drift, anomaly markers, and watchlist reason in drawer', () => {
@@ -61,5 +61,12 @@ describe('VesselMap selective drilldown', () => {
     expect(source).toMatch(/Watchlist reason/)
     expect(source).toMatch(/ETA drift/)
     expect(source).toMatch(/Anomaly markers/)
+  })
+
+  it('adds deterministic vessel story text from live drilldown context', () => {
+    expect(source).toMatch(/function vesselStoryText/)
+    expect(source).toMatch(/Vessel Story/)
+    expect(source).toMatch(/Track evidence/)
+    expect(source).toMatch(/ETA drift is/)
   })
 })

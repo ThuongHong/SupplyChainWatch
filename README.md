@@ -43,10 +43,10 @@ Configurable env vars:
 |---|---|
 | `DASHSCOPE_API_KEY` | _(required for LLM)_ |
 | `DASHSCOPE_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
-| `LLM_MODEL_FAST` | `qwen3.6-flash` |
-| `LLM_MODEL_FAST_FALLBACKS` | `qwen3.5-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash-2026-02-23` |
+| `LLM_MODEL_FAST` | `qwen3.5-flash` |
+| `LLM_MODEL_FAST_FALLBACKS` | `qwen3.5-flash-2026-02-23` |
 | `LLM_MODEL_REASONING` | `deepseek-v4-flash` |
-| `LLM_MODEL_REASONING_FALLBACKS` | `qwen3.6-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash,qwen3.5-flash-2026-02-23` |
+| `LLM_MODEL_REASONING_FALLBACKS` | `qwen3.5-flash,qwen3.5-flash-2026-02-23` |
 | `LLM_ENABLED` | `true` |
 
 Set `LLM_ENABLED=false` to force template fallbacks. Smoke test:

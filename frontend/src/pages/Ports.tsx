@@ -3,8 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import {
   apiClient,
   type DataCoverageResponse,
+  type EntityRiskForecastResponse,
   type PortCongestionResponse,
   type RiskEntityHistoryResponse,
+  type RiskStoryEventResponse,
 } from '../api/client'
 import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
@@ -91,6 +93,11 @@ function riskEntityId(port: PortViewModel): string | null {
 const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => void }> = ({ port, demo, onClick }) => {
   const row = port.congestion
   const sparkData = demo ? timelineValues([], port.id, true) : []
+  const aisCount = row?.total_in_area ?? 0
+  const pwCount = (row as PortCongestionResponse | undefined)?.portwatch_n_total ?? null
+  const pwPortcalls = (row as PortCongestionResponse | undefined)?.portwatch_portcalls ?? null
+  const displayCount = aisCount > 0 ? aisCount : (pwCount ?? 0)
+  const displaySource = aisCount > 0 ? 'AIS vessels in area' : pwCount != null ? 'PortWatch vessels' : 'vessels in area'
   return (
     <Card hover onClick={onClick} style={{ padding: '14px 16px', cursor: 'pointer' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
@@ -105,17 +112,25 @@ const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => vo
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
         <div>
-          <div className="mono-num" style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>{row?.total_in_area ?? 0}</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>vessels in area</div>
+          <div className="mono-num" style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>{displayCount}</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{displaySource}</div>
           <div style={{ marginTop: 6, display: 'flex', gap: 12 }}>
             <div>
               <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row?.anchored_count ?? 0}</div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>anchored</div>
             </div>
-            <div>
-              <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row?.avg_dwell_hours?.toFixed(1) ?? 'n/a'}h</div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>dwell</div>
-            </div>
+            {pwPortcalls != null && (
+              <div>
+                <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{pwPortcalls}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>portcalls/wk</div>
+              </div>
+            )}
+            {pwPortcalls == null && (
+              <div>
+                <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row?.avg_dwell_hours?.toFixed(1) ?? 'n/a'}h</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>dwell</div>
+              </div>
+            )}
           </div>
         </div>
         <Sparkline data={sparkData} color={severityColor[port.severity]} width={72} height={36} />
@@ -129,14 +144,19 @@ const PortDetail: React.FC<{
   timeline: PortCongestionResponse[]
   history?: RiskEntityHistoryResponse
   coverage: DataCoverageResponse[]
+  stories: RiskStoryEventResponse[]
+  forecast?: EntityRiskForecastResponse
   loading: boolean
   demo: boolean
   onClose: () => void
   onNavigate?: (page: PageId) => void
-}> = ({ port, timeline, history, coverage, loading, demo, onClose, onNavigate }) => {
+}> = ({ port, timeline, history, coverage, stories, forecast, loading, demo, onClose, onNavigate }) => {
   const values = timelineValues(timeline, port.id, demo)
   const riskHistoryValues = history?.snapshots.map(row => Number(row.risk_score ?? 0)).filter(Number.isFinite) ?? []
   const insufficientHistory = history?.data_sufficiency?.status === 'insufficient_history'
+  const forecastScores = (forecast?.predictions ?? [])
+    .map(point => point.risk_score)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
   const min = values.length ? Math.min(...values) : 0
   const max = values.length ? Math.max(...values) : 1
   const range = max - min || 1
@@ -190,6 +210,38 @@ const PortDetail: React.FC<{
             <EmptyState title="No risk history rows" detail="Run historical PortWatch backfill and feature refresh for this port." compact />
           )}
           {insufficientHistory && <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 8 }}>Insufficient history for storytelling or forecast. Coverage gaps: {coverage.reduce((sum, row) => sum + row.missing_days, 0)} days.</div>}
+        </Card>
+        <Card style={{ padding: 14 }}>
+          <SectionHeader
+            title="Story Events"
+            sub={stories.length ? `${stories.length} historical risk events` : 'No generated events'}
+            action={<DataProvenance mode={stories.length ? 'live' : 'empty'} source="Real risk_story_events" />}
+          />
+          {stories.slice(0, 3).map(story => (
+            <div key={story.event_key} style={{ padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{story.event_type.replace(/_/g, ' ')}</span>
+                <Badge variant={story.severity === 'high' ? 'danger' : story.severity === 'medium' ? 'warning' : 'success'}>{story.attention_level}</Badge>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55, marginTop: 4 }}>{story.narrative}</div>
+            </div>
+          ))}
+          {stories.length === 0 && <EmptyState title="No live story events" detail="Historical feature snapshots have not crossed configured story thresholds for this port." compact />}
+        </Card>
+        <Card style={{ padding: 14 }}>
+          <SectionHeader
+            title="Forecast Readiness"
+            sub={forecast?.data_sufficiency_status === 'sufficient' ? `${forecast.horizon_days}-day risk path` : 'Prediction unavailable'}
+            action={<DataProvenance mode={forecast?.data_sufficiency_status === 'sufficient' ? 'live' : 'empty'} source="Real entity risk forecast" />}
+          />
+          {forecast?.data_sufficiency_status === 'sufficient' && forecastScores.length > 1 ? (
+            <>
+              <Sparkline data={forecastScores} color="var(--accent)" width={220} height={48} />
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 8 }}>Confidence {Math.round(forecast.confidence * 100)}% · train {forecast.train_window_start ?? 'n/a'} to {forecast.train_window_end ?? 'n/a'}</div>
+            </>
+          ) : (
+            <EmptyState title="Forecast unavailable" detail={forecast?.unavailable_reason ?? 'Need sufficient real risk feature history before forecast generation.'} compact />
+          )}
         </Card>
         <Card style={{ padding: 14 }}>
           <SectionHeader title="Why This Matters" sub="Operational interpretation" />
@@ -248,6 +300,17 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
     queryKey: selectedRiskEntityId ? queryKeys.riskEntityHistory(selectedRiskEntityId, 180) : ['risk', 'history', 'no-selection'],
     queryFn: ({ signal }) => apiClient.riskEntityHistory(selectedRiskEntityId!, 180, { signal }),
     enabled: Boolean(selectedRiskEntityId && !usingDemo),
+  })
+  const riskStoriesQuery = useQuery({
+    queryKey: queryKeys.riskStories(selectedRiskEntityId ?? undefined, 180, 5),
+    queryFn: ({ signal }) => apiClient.riskStories({ entity_id: selectedRiskEntityId!, days: 180, limit: 5 }, { signal }),
+    enabled: Boolean(selectedRiskEntityId && !usingDemo),
+  })
+  const riskForecastQuery = useQuery({
+    queryKey: selectedRiskEntityId ? queryKeys.riskEntityForecast(selectedRiskEntityId) : ['risk', 'forecast', 'no-selection'],
+    queryFn: ({ signal }) => apiClient.riskEntityForecast(selectedRiskEntityId!, { signal }),
+    enabled: Boolean(selectedRiskEntityId && !usingDemo),
+    retry: false,
   })
   const regions = useMemo(() => ['All', ...Array.from(new Set(ports.map(port => port.region).filter(Boolean) as string[])).sort()], [ports])
   const filtered = ports.filter(port =>
@@ -325,7 +388,9 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
             timeline={timelineQuery.data ?? []}
             history={riskEntityHistoryQuery.data}
             coverage={riskCoverageQuery.data ?? []}
-            loading={timelineQuery.isLoading || riskEntityHistoryQuery.isLoading}
+            stories={riskStoriesQuery.data ?? []}
+            forecast={riskForecastQuery.data}
+            loading={timelineQuery.isLoading || riskEntityHistoryQuery.isLoading || riskStoriesQuery.isLoading || riskForecastQuery.isLoading}
             demo={usingDemo}
             onClose={() => setSelectedPort(null)}
             onNavigate={onNavigate}

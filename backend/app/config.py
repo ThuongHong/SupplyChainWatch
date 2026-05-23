@@ -38,14 +38,10 @@ class Settings(BaseSettings):
     )
     dashscope_api_key: SecretStr | None = None
     dashscope_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    llm_model_fast: str = "qwen3.6-flash"
-    llm_model_fast_fallbacks: str = (
-        "qwen3.5-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash-2026-02-23"
-    )
+    llm_model_fast: str = "qwen3.5-flash"
+    llm_model_fast_fallbacks: str = "qwen3.5-flash-2026-02-23"
     llm_model_reasoning: str = "deepseek-v4-flash"
-    llm_model_reasoning_fallbacks: str = (
-        "qwen3.6-flash,qwen3.6-flash-2026-04-16,qwen3.5-flash,qwen3.5-flash-2026-02-23"
-    )
+    llm_model_reasoning_fallbacks: str = "qwen3.5-flash,qwen3.5-flash-2026-02-23"
     llm_enabled: bool = True
     rate_limit_enabled: bool = False
     llm_timeout_fast: int = 30

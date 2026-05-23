@@ -142,6 +142,8 @@ export interface PortCongestionResponse {
   total_in_area: number;
   avg_dwell_hours?: number | null;
   median_speed?: number | null;
+  portwatch_n_total?: number | null;
+  portwatch_portcalls?: number | null;
 }
 
 export interface ChokepointResponse {
@@ -429,6 +431,11 @@ export const apiClient = {
   correlations: (indices: string, days = 180, init?: RequestInit) =>
     request<CorrelationCell[]>(`/api/correlations${queryString({ indices, days })}`, init),
   overviewStats: (init?: RequestInit) => request<OverviewStats>("/api/stats/overview", init),
+  forceSync: (init?: RequestInit) =>
+    request<{ status: string; task_id: string }>("/api/sync/force", {
+      ...init,
+      method: "POST",
+    }),
   globalPortRisk: (limit = 25, init?: RequestInit) =>
     request<RiskScoreResponse[]>(`/api/risk/ports${queryString({ limit })}`, init),
   congestionHeatmap: (init?: RequestInit) =>

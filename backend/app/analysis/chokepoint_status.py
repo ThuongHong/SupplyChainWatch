@@ -17,7 +17,7 @@ def compute_chokepoint_status(db: Session) -> int:
                 FROM vessel_positions vp
                 CROSS JOIN latest
                 WHERE latest.snapshot_time IS NOT NULL
-                  AND vp.time >= latest.snapshot_time - INTERVAL '15 minutes'
+                  AND vp.time >= latest.snapshot_time - INTERVAL '24 hours'
                 ORDER BY vp.mmsi, vp.time DESC
             ),
             computed AS (

@@ -31,20 +31,34 @@ def parse_bunker_prices(html: str) -> list[dict[str, Any]]:
     """Parse bunker rows from a table-like HTML fragment."""
     soup = BeautifulSoup(html, "html.parser")
     rows: list[dict[str, Any]] = []
-    for table_row in soup.select("tr"):
-        cells = [cell.get_text(" ", strip=True) for cell in table_row.select("td")]
-        if len(cells) < 3:
+    for table in soup.select("table"):
+        caption = (table.get("caption") or table.get("summary") or "").upper()
+        fuel_type = _fuel_type_from_caption(caption)
+        if fuel_type is None:
             continue
-        port_code, fuel_type, price = cells[0], cells[1], cells[2].replace("$", "").replace(",", "")
-        try:
-            rows.append(
-                {
-                    "time": datetime.now(UTC),
-                    "port_code": port_code.upper(),
-                    "fuel_type": fuel_type.upper(),
-                    "price_usd_per_ton": float(price),
-                }
-            )
-        except ValueError:
-            continue
+        for table_row in table.select("tr"):
+            port_cell = table_row.select_one("th")
+            cells = [cell.get_text(" ", strip=True) for cell in table_row.select("td")]
+            if port_cell is None or not cells:
+                continue
+            port_code = port_cell.get_text(" ", strip=True)
+            price = cells[0].replace("$", "").replace(",", "")
+            try:
+                rows.append(
+                    {
+                        "time": datetime.now(UTC),
+                        "port_code": port_code.upper(),
+                        "fuel_type": fuel_type,
+                        "price_usd_per_ton": float(price),
+                    }
+                )
+            except ValueError:
+                continue
     return rows
+
+
+def _fuel_type_from_caption(caption: str) -> str | None:
+    for fuel_type in ("VLSFO", "MGO", "IFO380"):
+        if fuel_type in caption:
+            return fuel_type
+    return None

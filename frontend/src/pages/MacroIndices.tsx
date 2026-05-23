@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { apiClient, type ForecastResponse, type IndexPoint, type IndexSummary } from '../api/client'
+import { apiClient, type CorrelationCell, type ForecastResponse, type IndexPoint, type IndexSummary } from '../api/client'
 import { queryKeys } from '../api/queries'
 import {
   DataProvenance,
@@ -79,6 +79,10 @@ const valueUnit = (name: string): string => {
   if (name === 'RSAFS') return 'M'
   return ''
 }
+
+const strongestCorrelation = (cells: CorrelationCell[]): CorrelationCell | null => cells
+  .filter(cell => cell.index_a !== cell.index_b && typeof cell.correlation === 'number')
+  .sort((a, b) => Math.abs(b.correlation ?? 0) - Math.abs(a.correlation ?? 0))[0] ?? null
 
 const periodSlice = (points: IndexPoint[], period: Period) => {
   const days = PERIOD_DAYS[period]
@@ -249,6 +253,71 @@ const ForecastPanel: React.FC<{ index: IndexMeta; forecast?: ForecastResponse; i
   )
 }
 
+const MarketStoryPanel: React.FC<{
+  active: IndexMeta[]
+  histories: Record<string, IndexPoint[]>
+  period: Period
+  forecasts: Array<ForecastResponse | undefined>
+  correlations: CorrelationCell[]
+  loading: boolean
+}> = ({ active, histories, period, forecasts, correlations, loading }) => {
+  const movers = active
+    .map(index => ({ index, change: percentChange(periodSlice(histories[index.index_name] ?? [], period)) }))
+    .filter((item): item is { index: IndexMeta; change: number } => item.change != null)
+    .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+  const topMover = movers[0]
+  const corr = strongestCorrelation(correlations)
+  const forecastNotes = active
+    .map((index, i) => {
+      const points = forecastPoints(forecasts[i])
+      const first = forecastValue(points[0])
+      const last = forecastValue(points[points.length - 1])
+      if (first == null || last == null || first === 0) return null
+      return { index, change: ((last - first) / first) * 100 }
+    })
+    .filter((item): item is { index: IndexMeta; change: number } => item != null)
+    .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+  const forecastNote = forecastNotes[0]
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHeader
+        title="Market Story"
+        sub="Deterministic narrative from live histories, correlations, and forecasts."
+        action={<DataProvenance mode={loading ? 'loading' : active.length ? 'live' : 'empty'} source="Index histories + forecast rows" />}
+      />
+      {loading ? <SkeletonBlock height={112} lines={4} /> : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+          <div style={{ padding: 12, borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+            <Badge variant={topMover && topMover.change >= 0 ? 'success' : topMover ? 'danger' : 'default'}>Top move</Badge>
+            <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.55 }}>
+              {topMover
+                ? `${topMover.index.abbr} moved ${fmtPct(topMover.change)} over ${period}. This is the strongest selected-series move and anchors the current macro read.`
+                : 'Need at least two points in selected period before ranking index moves.'}
+            </div>
+          </div>
+          <div style={{ padding: 12, borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+            <Badge variant={corr && Math.abs(corr.correlation ?? 0) >= 0.75 ? 'warning' : 'info'}>Relationship</Badge>
+            <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.55 }}>
+              {corr
+                ? `${shortName(corr.index_a)} and ${shortName(corr.index_b)} show ${(corr.correlation ?? 0) >= 0 ? 'positive' : 'negative'} correlation (${(corr.correlation ?? 0).toFixed(2)}) across ${corr.overlap} overlapping days.`
+                : 'Select at least two series with overlapping daily history to see relationship context.'}
+            </div>
+          </div>
+          <div style={{ padding: 12, borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+            <Badge variant={forecastNote && forecastNote.change >= 0 ? 'success' : forecastNote ? 'danger' : 'default'}>Forward read</Badge>
+            <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.55 }}>
+              {forecastNote
+                ? `${forecastNote.index.abbr} forecast path changes ${fmtPct(forecastNote.change)} across the returned horizon; compare with MAPE before treating it as reliable.`
+                : 'Forecast rows are unavailable for the selected series or lack numeric prediction points.'}
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export const MacroIndices: React.FC = () => {
   const [period, setPeriod] = useState<Period>('90D')
   const [mode, setMode] = useState<Mode>('raw')
@@ -298,6 +367,12 @@ export const MacroIndices: React.FC = () => {
       queryFn: ({ signal }: { signal: AbortSignal }) => apiClient.indexForecast(index.index_name, { signal }),
       retry: false,
     })),
+  })
+  const correlationNames = activeNames.join(',')
+  const correlationsQuery = useQuery({
+    queryKey: queryKeys.correlations(correlationNames || 'none', PERIOD_DAYS[period] ?? 365),
+    queryFn: ({ signal }) => apiClient.correlations(correlationNames, PERIOD_DAYS[period] ?? 365, { signal }),
+    enabled: activeNames.length >= 2,
   })
 
   const toggleIndex = (name: string) => {
@@ -357,6 +432,15 @@ export const MacroIndices: React.FC = () => {
             )
           })}
         </div>
+
+        <MarketStoryPanel
+          active={activeIndices}
+          histories={histories}
+          period={period}
+          forecasts={forecastQueries.map(query => query.data)}
+          correlations={correlationsQuery.data ?? []}
+          loading={loading || correlationsQuery.isLoading || forecastQueries.some(query => query.isLoading)}
+        />
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))', gap: 12 }}>
           {activeIndices.map((index, i) => (

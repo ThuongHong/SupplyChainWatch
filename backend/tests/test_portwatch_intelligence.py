@@ -19,10 +19,12 @@ from app.analysis.maritime_risk import (
 from app.analysis.vessel_monitoring import course_delta_degrees, eta_drift_minutes
 from app.api.routes.risk import monitored_entity_detail, watched_vessel_eta_drift
 from app.collectors.base import BaseCollector
-from app.collectors.portwatch import PortWatchCollector
+from app.collectors.portwatch import PortWatchCollector, normalize_feature
 from app.db.models import CollectionLog
+from app.schemas.records import PortWatchMetricRecord
 from app.services.enrichment import enrich_watchlist_vessel
 from app.services.watchlist import MAJOR_ROUTE_RULES
+from app.tasks import jobs
 
 
 class BadPortWatchCollector(BaseCollector[BaseModel]):
@@ -126,7 +128,136 @@ def test_portwatch_collector_uses_portid_filter() -> None:
     assert records
     assert len(requested_params) == 2
     assert "portid IN" in requested_params[0]["where"]
+    assert "port1201" in requested_params[0]["where"]
+    assert "port1188" in requested_params[0]["where"]
+    assert "port2027" in requested_params[0]["where"]
+    assert "port1114" in requested_params[0]["where"]
+    assert "port664" in requested_params[0]["where"]
     assert "date >= " in requested_params[0]["where"]
+    assert "chokepoint1" in requested_params[1]["where"]
+    assert "chokepoint2" in requested_params[1]["where"]
+    assert "chokepoint3" in requested_params[1]["where"]
+    assert "chokepoint4" in requested_params[1]["where"]
+    assert "chokepoint5" in requested_params[1]["where"]
+    assert "chokepoint28" in requested_params[1]["where"]
+
+
+def test_portwatch_matches_known_source_id_without_display_name() -> None:
+    rows = normalize_feature(
+        {
+            "attributes": {
+                "portid": "port1201",
+                "date": "2026-05-20",
+                "portcalls": 120,
+            }
+        },
+        entity_hint="port",
+        source="portwatch_ports",
+    )
+
+    assert rows
+    assert rows[0]["entity_id"] == "port-sgsin"
+    assert rows[0]["entity_name"] == "Singapore"
+
+
+def test_portwatch_matches_bab_el_mandeb_dash_variant() -> None:
+    rows = normalize_feature(
+        {
+            "attributes": {
+                "portid": "chokepoint3",
+                "portname": "Bab el-Mandeb Strait",
+                "date": "2026-05-20",
+                "n_total": 76,
+            }
+        },
+        entity_hint="chokepoint",
+        source="portstraitwatch_chokepoints",
+    )
+
+    assert rows
+    assert rows[0]["entity_id"] == "region-red-sea"
+    assert rows[0]["entity_name"] == "Red Sea"
+
+
+def test_portwatch_collector_aggregates_duplicate_normalized_metrics() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("returnCountOnly") == "true":
+            return httpx.Response(200, request=request, json={"count": 0})
+        if "Daily_Ports_Data" not in str(request.url):
+            return httpx.Response(200, request=request, json={"features": []})
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "features": [
+                    {
+                        "attributes": {
+                            "portid": "port1188",
+                            "date": "2026-05-20",
+                            "portcalls": 7,
+                        }
+                    },
+                    {
+                        "attributes": {
+                            "portid": "port2027",
+                            "date": "2026-05-20",
+                            "portcalls": 11,
+                        }
+                    },
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    records = PortWatchCollector(client=client, use_portid_filter=True).run()
+
+    assert len(records) == 1
+    assert records[0].entity_id == "port-cnsha"
+    assert records[0].metric_name == "portcalls"
+    assert records[0].metric_value == pytest.approx(18)
+    assert records[0].metadata["source_entity_ids"] == ["port1188", "port2027"]
+
+
+class FakePortWatchPersistenceDb:
+    def __init__(self) -> None:
+        self.added: list[Any] = []
+        self.merged: list[Any] = []
+        self.commits = 0
+
+    def add(self, row: Any) -> None:
+        self.added.append(row)
+
+    def merge(self, row: Any) -> None:
+        self.merged.append(row)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+
+def test_portwatch_metric_persistence_uses_merge_for_overlapping_rows() -> None:
+    observed_at = datetime(2026, 5, 20, tzinfo=UTC)
+    first = PortWatchMetricRecord(
+        observed_at=observed_at,
+        entity_type="port",
+        entity_id="port-cnsha",
+        entity_name="Shanghai",
+        metric_name="portcalls",
+        metric_value=7,
+        unit="count",
+        source="portwatch_ports",
+        source_entity_id="port1188",
+        metadata={"source_contract": "arcgis_featureserver"},
+    )
+    updated = first.model_copy(update={"metric_value": 11})
+    db = FakePortWatchPersistenceDb()
+
+    jobs._persist_records([first, updated], db)
+
+    assert db.added == []
+    assert len(db.merged) == 2
+    assert [row.metric_value for row in db.merged] == [7, 11]
+    assert db.commits == 1
 
 
 def test_portwatch_collector_unavailable_uses_demo_fallback() -> None:

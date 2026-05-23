@@ -12,6 +12,30 @@ FEATURE_PAGE_SIZE = 1000
 RECENT_FEATURE_SAMPLE_SIZE = 200
 OBJECT_ID_BATCH_SIZE = 50
 
+PORTWATCH_TARGET_PORTIDS = ("port1201", "port1188", "port2027", "port1114", "port664")
+PORTSTRAITWATCH_TARGET_PORTIDS = (
+    "chokepoint1",
+    "chokepoint2",
+    "chokepoint3",
+    "chokepoint4",
+    "chokepoint5",
+    "chokepoint28",
+)
+PORTWATCH_ENTITY_BY_ID = {entity.entity_id: entity for entity in PORTWATCH_ENTITIES}
+PORTWATCH_SOURCE_ID_TO_ENTITY = {
+    "port1201": PORTWATCH_ENTITY_BY_ID["port-sgsin"],
+    "port1188": PORTWATCH_ENTITY_BY_ID["port-cnsha"],
+    "port2027": PORTWATCH_ENTITY_BY_ID["port-cnsha"],
+    "port1114": PORTWATCH_ENTITY_BY_ID["port-nlrtm"],
+    "port664": PORTWATCH_ENTITY_BY_ID["port-uslax"],
+    "chokepoint1": PORTWATCH_ENTITY_BY_ID["cp-suez"],
+    "chokepoint2": PORTWATCH_ENTITY_BY_ID["cp-panama"],
+    "chokepoint3": PORTWATCH_ENTITY_BY_ID["region-red-sea"],
+    "chokepoint4": PORTWATCH_ENTITY_BY_ID["region-black-sea"],
+    "chokepoint5": PORTWATCH_ENTITY_BY_ID["cp-malacca"],
+    "chokepoint28": PORTWATCH_ENTITY_BY_ID["region-black-sea"],
+}
+
 
 class PortWatchFeatureAdapter:
     """ArcGIS FeatureServer adapter for PortWatch-style layers."""
@@ -25,18 +49,7 @@ class PortWatchFeatureAdapter:
             is_ports = "Daily_Ports_Data" in url or "ports" in url.lower()
             is_chokepoints = "Daily_Chokepoints_Data" in url or "chokepoint" in url.lower()
             if is_ports or is_chokepoints:
-                ids = (
-                    ["port1201", "port1188", "port2027", "port1114", "port664"]
-                    if is_ports
-                    else [
-                        "chokepoint1",
-                        "chokepoint2",
-                        "chokepoint3",
-                        "chokepoint4",
-                        "chokepoint5",
-                        "chokepoint28",
-                    ]
-                )
+                ids = PORTWATCH_TARGET_PORTIDS if is_ports else PORTSTRAITWATCH_TARGET_PORTIDS
                 history_days = max(1, int(getattr(self.collector, "history_days", 90)))
                 since_date = (datetime.now(UTC) - timedelta(days=history_days)).strftime("%Y-%m-%d")
                 ids_str = ", ".join(f"'{i}'" for i in ids)
@@ -271,13 +284,18 @@ def _match_entity(name: str | None, source_id: str | None) -> Any | None:
     for candidate in candidates:
         if not candidate:
             continue
-        # Normalize aliases with dash and whitespace variants.
-        lowered = " ".join(str(candidate).lower().replace("-", " ").split())
+        lowered = _normalize_candidate(candidate)
+        if lowered in PORTWATCH_SOURCE_ID_TO_ENTITY:
+            return PORTWATCH_SOURCE_ID_TO_ENTITY[lowered]
         for alias, entity in PORTWATCH_ALIAS_TO_ENTITY.items():
-            norm_alias = " ".join(alias.lower().replace("-", " ").split())
+            norm_alias = _normalize_candidate(alias)
             if norm_alias in lowered or lowered == norm_alias:
                 return entity
     return None
+
+
+def _normalize_candidate(value: object) -> str:
+    return " ".join(str(value).lower().replace("-", " ").split())
 
 
 def _observed_at(attrs: dict[str, Any]) -> datetime:

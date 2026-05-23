@@ -274,6 +274,60 @@ def test_generate_risk_story_events_creates_worsening_event_and_insight() -> Non
     assert db.added[0].event_type == "risk_worsening"
 
 
+def test_generate_risk_story_events_creates_driver_change_story() -> None:
+    db = FakeDb(
+        {
+            "FROM risk_feature_snapshots": [
+                {
+                    "snapshot_date": date(2026, 5, 4),
+                    "entity_type": "port",
+                    "entity_id": "port-sgsin",
+                    "entity_name": "Singapore",
+                    "risk_score": 62,
+                    "severity": "medium",
+                    "feature_values": {"risk_score": 62},
+                    "baseline_values": {"risk_score": 60},
+                    "z_scores": {"risk_score": 0.2},
+                    "deltas": {"risk_score": 2, "risk_score_pct": 3.3},
+                    "missing_features": [],
+                    "driver_metadata": {
+                        "component_scores": {"traffic_anomaly": 80, "trade_flow_change": 30},
+                        "source_metrics": {"daily_vessel_calls": 110},
+                    },
+                    "source_freshness": {"status": "fresh"},
+                },
+                {
+                    "snapshot_date": date(2026, 5, 5),
+                    "entity_type": "port",
+                    "entity_id": "port-sgsin",
+                    "entity_name": "Singapore",
+                    "risk_score": 64,
+                    "severity": "medium",
+                    "feature_values": {"risk_score": 64},
+                    "baseline_values": {"risk_score": 62},
+                    "z_scores": {"risk_score": 0.4},
+                    "deltas": {"risk_score": 2, "risk_score_pct": 3.2},
+                    "missing_features": [],
+                    "driver_metadata": {
+                        "component_scores": {"traffic_anomaly": 20, "trade_flow_change": 90},
+                        "source_metrics": {"trade_volume_index": 55},
+                    },
+                    "source_freshness": {"status": "fresh"},
+                },
+            ]
+        }
+    )
+
+    created = generate_risk_story_events(db, z_threshold=2.0, percent_change_threshold=50)
+
+    assert created == 1
+    story = db.merged[0]
+    assert story.event_type == "driver_change"
+    assert story.metric == "top_driver"
+    assert "risk driver changed from traffic_anomaly to trade_flow_change" in story.narrative
+    assert db.added[0].event_type == "driver_change"
+
+
 def test_generate_entity_risk_forecasts_gates_on_history_and_records_baseline_output() -> None:
     start = date(2026, 5, 1)
     rows = [

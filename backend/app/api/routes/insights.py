@@ -43,10 +43,24 @@ async def latest_insights(
 ) -> list[dict[str, object]]:
     result = await db.execute(
         text("""
+            WITH ranked AS (
+                SELECT id, generated_at, category, title, narrative, narrative_llm,
+                       narrative_model, narrative_generated_at, metrics, priority,
+                       event_type, confidence, affected_entities, source_metrics,
+                       attention_level,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY COALESCE(category, ''), title
+                           ORDER BY generated_at DESC, id DESC
+                       ) AS duplicate_rank
+                FROM insights
+            )
             SELECT id, generated_at, category, title, narrative, narrative_llm,
-                   narrative_model, narrative_generated_at, metrics, priority
-            FROM insights
-            ORDER BY priority DESC, generated_at DESC
+                   narrative_model, narrative_generated_at, metrics, priority,
+                   event_type, confidence, affected_entities, source_metrics,
+                   attention_level
+            FROM ranked
+            WHERE duplicate_rank = 1
+            ORDER BY priority DESC, generated_at DESC, id DESC
             LIMIT :limit
             """),
         {"limit": limit},

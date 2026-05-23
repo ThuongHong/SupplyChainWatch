@@ -240,10 +240,69 @@ def generate_risk_story_events(
                 ORDER BY entity_id, snapshot_date
                 """)).mappings().all()
     created = 0
+    previous_driver_by_entity: dict[str, str] = {}
     for row in rows:
         score = _optional_float(row["risk_score"])
         if score is None:
             continue
+        entity_id = str(row["entity_id"])
+        entity_name = str(row["entity_name"])
+        event_date = _as_date(row["snapshot_date"])
+        event_time = datetime.combine(event_date, datetime.min.time(), tzinfo=UTC)
+        drivers = _drivers(row["driver_metadata"])
+        top_driver = drivers[0] if drivers else None
+        previous_driver = previous_driver_by_entity.get(entity_id)
+        if top_driver:
+            previous_driver_by_entity[entity_id] = top_driver
+        if previous_driver and top_driver and previous_driver != top_driver:
+            narrative = deterministic_driver_change_text(
+                entity_name, previous_driver, top_driver, score
+            )
+            event = RiskStoryEvent(
+                event_key=f"{entity_id}:{event_date.isoformat()}:driver_change:{top_driver}",
+                event_time=event_time,
+                entity_type=str(row["entity_type"]),
+                entity_id=entity_id,
+                entity_name=entity_name,
+                event_type="driver_change",
+                severity=str(row["severity"]),
+                metric="top_driver",
+                observed=score,
+                expected=None,
+                z_score=None,
+                percent_change=None,
+                drivers=dict(row["driver_metadata"] or {}),
+                source_metrics=dict((row["driver_metadata"] or {}).get("source_metrics") or {}),
+                narrative=narrative,
+                confidence=0.7,
+                attention_level="watch" if score >= 65 else "monitor",
+                data_sufficiency={
+                    "missing_features": list(row["missing_features"] or []),
+                    "source_freshness": row["source_freshness"],
+                },
+            )
+            db.merge(event)
+            db.add(
+                Insight(
+                    category="risk_story",
+                    event_type=event.event_type,
+                    confidence=event.confidence,
+                    title=f"{event.entity_name} risk driver changed",
+                    narrative=narrative,
+                    affected_entities=[
+                        {
+                            "type": event.entity_type,
+                            "id": event.entity_id,
+                            "name": event.entity_name,
+                        }
+                    ],
+                    source_metrics=event.source_metrics,
+                    metrics={"previous_driver": previous_driver, "current_driver": top_driver},
+                    attention_level=event.attention_level,
+                    priority=6 if score >= 65 else 3,
+                )
+            )
+            created += 1
         z_score = float((row["z_scores"] or {}).get("risk_score") or 0)
         pct = float((row["deltas"] or {}).get("risk_score_pct") or 0)
         if abs(z_score) < z_limit and abs(pct) < pct_limit:
@@ -251,19 +310,17 @@ def generate_risk_story_events(
         event_type = "risk_recovery" if z_score < 0 or pct < 0 else "risk_worsening"
         observed = score
         expected = _optional_float((row["baseline_values"] or {}).get("risk_score"))
-        event_date = _as_date(row["snapshot_date"])
-        event_time = datetime.combine(event_date, datetime.min.time(), tzinfo=UTC)
         confidence = min(0.95, 0.45 + min(abs(z_score), 5) * 0.1 + min(abs(pct), 100) / 400)
         attention = "urgent" if score >= 85 else "watch" if score >= 65 else "monitor"
         narrative = deterministic_story_text(
-            str(row["entity_name"]), event_type, observed, expected, z_score, pct
+            entity_name, event_type, observed, expected, z_score, pct
         )
         event = RiskStoryEvent(
-            event_key=f"{row['entity_id']}:{event_date.isoformat()}:{event_type}:risk_score",
+            event_key=f"{entity_id}:{event_date.isoformat()}:{event_type}:risk_score",
             event_time=event_time,
             entity_type=str(row["entity_type"]),
-            entity_id=str(row["entity_id"]),
-            entity_name=str(row["entity_name"]),
+            entity_id=entity_id,
+            entity_name=entity_name,
             event_type=event_type,
             severity=str(row["severity"]),
             metric="risk_score",
@@ -417,6 +474,18 @@ def deterministic_story_text(
     return (
         f"{entity_name} risk {direction} to {observed:.0f}/100{baseline}. "
         f"Change is {percent_change:.1f}% with z-score {z_score:.2f}; review real source drivers."
+    )
+
+
+def deterministic_driver_change_text(
+    entity_name: str,
+    previous_driver: str,
+    current_driver: str,
+    risk_score: float,
+) -> str:
+    return (
+        f"{entity_name} risk driver changed from {previous_driver} to {current_driver} "
+        f"while risk score is {risk_score:.0f}/100; review whether the operational cause shifted."
     )
 
 

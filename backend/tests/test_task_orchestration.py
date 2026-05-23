@@ -26,6 +26,7 @@ def test_collect_portwatch_uses_explicit_demo_setting_and_chains_risk(
 
     monkeypatch.setattr(jobs, "_run_collector", fake_run_collector)
     monkeypatch.setattr(jobs, "_run_risk_derivation", lambda: chained.append(True))
+    monkeypatch.setattr(jobs, "collect_ais_snapshot", lambda: None)
 
     rows = jobs.collect_portwatch()
 
@@ -103,11 +104,11 @@ def test_risk_derivation_refreshes_downstream_outputs(monkeypatch: pytest.Monkey
         "risk",
         "propagation",
         "watchlist",
-        "insights",
         "coverage",
         "features",
         "stories",
         "risk_forecasts",
+        "insights",
     ]
 
 

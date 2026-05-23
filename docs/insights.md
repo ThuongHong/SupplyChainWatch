@@ -1,6 +1,6 @@
 # Verified Insight Targets
 
-These are the six report-grade insights the project is designed to verify. When live data is available, use the methods below to replace the current hypothesis status with measured values, charts, and screenshots.
+These are the six report-grade insights the project is designed to verify. Current findings use the local database state verified on 2026-05-23 after public BDI/FBX/WCI backfill and forecast generation.
 
 ## 1. Chokepoint Disruption Ripple Effect
 
@@ -15,6 +15,8 @@ These are the six report-grade insights the project is designed to verify. When 
 
 **Expected output:** Story Mode narrative plus lag/correlation chart.
 
+**Current status:** Partial. Freight history now exists for `FBX_GLOBAL` and `WCI_GLOBAL`, but chokepoint status still only has recent operational history, so a 90-180 day lag test is not valid yet. This insight should be presented as a live-monitoring hypothesis until chokepoint history accumulates.
+
 ## 2. Shanghai Port Lead-Lag Relationship
 
 **Hypothesis:** Shanghai congestion leads freight-rate pressure with a short lag.
@@ -27,6 +29,8 @@ These are the six report-grade insights the project is designed to verify. When 
 **Method:** Cross-correlation and event study around congestion spikes.
 
 **Expected output:** Port congestion chart, freight index overlay, and LLM narrative with guarded causality.
+
+**Current status:** Partial. Shanghai congestion exists, but the latest observation has `total_in_area=0` and `anchored_count=0` at 2026-05-23 13:05:47 UTC. `FBX_GLOBAL` now has 91 rows, but port congestion history is still too short for a defensible lead-lag claim.
 
 ## 3. Bunker Prices as Cost Pressure Signal
 
@@ -41,6 +45,8 @@ These are the six report-grade insights the project is designed to verify. When 
 
 **Expected output:** Forecast card with commentary that explicitly states MAPE.
 
+**Current status:** Verified as data-ready. The 2026-05-23 bunker scrape has valid Ship&Bunker rows across `IFO380`, `MGO`, and `VLSFO`; recent `IFO380` rows range from 659.50 USD/mt at Houston to 880.50 USD/mt at LA / Long Beach. Forecasts now exist for all three target freight indices: BDI MAPE 3.08%, FBX MAPE 14.73%, WCI MAPE 10.21%.
+
 ## 4. Port Congestion Anomaly Concentration
 
 **Hypothesis:** High-severity port anomalies cluster around major transshipment and gateway ports.
@@ -54,6 +60,8 @@ These are the six report-grade insights the project is designed to verify. When 
 
 **Expected output:** Anomaly timeline and expandable AI explanation.
 
+**Current status:** Verified for anomaly availability. The database has 1,646 anomaly rows. Latest high-severity rows are vessel ETA drift anomalies, including MMSI `367175860` at 115.2 minutes, `367625810` at 118.8 minutes, and `477893700` at 126.0 minutes detected at 2026-05-23 13:30 UTC. Latest port congestion ranking is Rotterdam 872 vessels in area, Singapore 356, Hamburg 296, Los Angeles 102, and Long Beach 98.
+
 ## 5. Freight Index Co-Movement
 
 **Hypothesis:** Container indices co-move more strongly with each other than with dry-bulk indices.
@@ -65,6 +73,8 @@ These are the six report-grade insights the project is designed to verify. When 
 **Method:** Pearson correlation on aligned daily data; repeat with detrending for robustness.
 
 **Expected output:** Correlation heatmap in Insights Hub.
+
+**Current status:** Partial. The DB now has `BDI` 20 rows, `FBX_GLOBAL` 91 rows, and `WCI_GLOBAL` 14 rows. Overlap is still thin: `BDI_WCI` has 4 aligned dates with correlation 0.5258; `BDI_FBX` has only 1 aligned date; `FBX_WCI` has 0 aligned dates. `BDI` vs Brent over the last 365 days has correlation -0.5491 on overlapping dates.
 
 ## 6. Forecast Reliability and Directional Use
 
@@ -79,14 +89,43 @@ These are the six report-grade insights the project is designed to verify. When 
 
 **Expected output:** 14-day forecast chart with confidence interval and commentary.
 
+**Current status:** Verified baseline forecast availability. Running `generate_forecasts()` on 2026-05-23 created 3 rows: `BDI` last actual 2991.0 with MAPE 3.08%, `FBX_GLOBAL` last actual 2000.0 with MAPE 14.73%, and `WCI_GLOBAL` last actual 2712.0 with MAPE 10.21%. These are moving-average baselines and should be described as directional, not predictive-grade ML.
+
 ## Current Implementation Status
 
-| Insight | Backend support | Frontend support | Needs live data |
+| Insight | Backend support | Frontend support | Current status |
 | --- | --- | --- | --- |
-| Chokepoint ripple | Story Mode + chokepoint status | Story Mode card | Yes |
-| Shanghai lead-lag | Port congestion + Story Mode | Story Mode card | Yes |
-| Bunker pressure | Bunker collector + forecast commenter | Forecast cards | Yes |
-| Port anomaly cluster | Anomaly detector + explainer | Anomaly timeline | Yes |
-| Freight co-movement | Correlation API | Heatmap | Partially |
-| Forecast reliability | Forecast job + MAPE | Forecast charts | Yes |
+| Chokepoint ripple | Story Mode + chokepoint status | Story Mode card | Partial: freight history exists, chokepoint history short |
+| Shanghai lead-lag | Port congestion + Story Mode | Story Mode card | Partial: port history short |
+| Bunker pressure | Bunker collector + forecast commenter | Forecast cards | Verified data-ready |
+| Port anomaly cluster | Anomaly detector + explainer | Anomaly timeline | Verified data availability |
+| Freight co-movement | Correlation API | Heatmap | Partial: overlap still thin |
+| Forecast reliability | Forecast job + MAPE | Forecast charts | Verified baseline forecasts |
 
+## Current Database Snapshot
+
+Verified on 2026-05-23:
+
+- `freight_indices`: 16,453 rows.
+- `BDI`: 20 rows from StockQ public BDI table, 2026-04-24 to 2026-05-22, latest 2991.0.
+- `FBX_GLOBAL`: 91 rows from Freightos public Infogram history plus current scraper data, 2024-07-12 to 2026-05-23, latest 2000.0.
+- `WCI_GLOBAL`: 14 rows from MTS/Drewry public summaries plus supplemental public February values, 2026-02-19 to 2026-05-21, latest 2712.0.
+- `forecasts`: 3 rows, one each for `BDI`, `FBX_GLOBAL`, and `WCI_GLOBAL`.
+- `bunker_prices`: 625 rows total. The latest valid scrape added 42 correctly parsed Ship&Bunker rows.
+- `port_congestion`: 160 rows.
+- `anomalies`: 1,646 rows.
+- `insights`: 20,764 rows.
+- `vessel_positions`: 8,122 rows.
+
+## Completed Data Actions
+
+1. Added `app.scripts.seed_public_freight_history` for public BDI, FBX, and WCI history.
+2. Allowed `BDI` in `app.scripts.backfill_freight_indices` manual backfill validation.
+3. Seeded 124 public freight-index rows into `freight_indices`.
+4. Re-ran `generate_forecasts()` and created 3 baseline forecast rows.
+
+## Remaining Data Actions
+
+1. Let port and chokepoint collection run longer before claiming lead-lag/ripple findings.
+2. Add route-level FBX/WCI alignment if stronger container co-movement evidence is needed.
+3. Re-run Story Mode after the frontend/API cache sees the new forecasts and freight rows.

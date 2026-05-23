@@ -108,6 +108,9 @@ class BaseCollector(Generic[RecordT]):
         except (CollectorError, ValidationError) as exc:
             self._finish_log(db, log_row, 0, "failed", str(exc))
             raise
+        except Exception as exc:
+            self._finish_log(db, log_row, 0, "failed", str(exc))
+            raise
 
     def _finish_log(
         self,

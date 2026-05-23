@@ -42,8 +42,6 @@ from app.db.models import (
     VesselPosition,
 )
 from app.db.session import SessionLocal
-from app.llm.anomaly_explainer import explain_recent_high_anomalies
-from app.llm.forecast_commenter import comment_recent_forecasts
 from app.llm.narrator import enrich_top_insights as enrich_top_insights_job
 from app.schemas.records import (
     BunkerPriceRecord,
@@ -92,6 +90,10 @@ def collect_openmeteo() -> int:
 @celery_app.task(name="collect_portwatch")
 def collect_portwatch() -> int:
     settings = get_settings()
+    try:
+        collect_ais_snapshot()
+    except Exception:
+        pass
     rows = _run_collector(
         PortWatchCollector(
             use_demo_fallback=settings.backend_demo_fallback_enabled,
@@ -157,7 +159,6 @@ def detect_anomalies() -> int:
     with SessionLocal() as db:
         created = detect_anomalies_job(db)
         created += detect_watchlist_vessel_anomalies(db)
-        explain_recent_high_anomalies(db)
         return created
 
 
@@ -166,7 +167,6 @@ def generate_forecast() -> int:
     with SessionLocal() as db:
         created = generate_forecasts(db)
         created += generate_entity_risk_forecasts(db)
-        comment_recent_forecasts(db)
         return created
 
 
@@ -230,11 +230,11 @@ def _run_risk_derivation() -> dict[str, int]:
         if risk_rows > 0:
             propagation_rows = compute_disruption_propagation(db)
             watchlist_rows = refresh_watchlist_from_risk(db)
-            insight_rows = generate_insights_job(db)
             coverage_rows = compute_data_coverage(db)
             feature_rows = build_risk_feature_snapshots(db)
             story_rows = generate_risk_story_events(db)
             forecast_rows = generate_entity_risk_forecasts(db)
+            insight_rows = generate_insights_job(db)
         return {
             "risk_rows": risk_rows,
             "propagation_rows": propagation_rows,

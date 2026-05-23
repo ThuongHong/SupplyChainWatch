@@ -129,22 +129,26 @@ export function forecastPoints(forecast?: ForecastResponse | null): ForecastPoin
   return (forecast?.predictions ?? []) as ForecastPoint[]
 }
 
-export function forecastValue(point: ForecastPoint): number | null {
+export function forecastValue(point?: ForecastPoint | null): number | null {
+  if (!point) return null
   const value = point.yhat ?? point.prediction ?? point.value
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-export function forecastLower(point: ForecastPoint): number | null {
+export function forecastLower(point?: ForecastPoint | null): number | null {
+  if (!point) return null
   const value = point.yhat_lower ?? point.lower
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-export function forecastUpper(point: ForecastPoint): number | null {
+export function forecastUpper(point?: ForecastPoint | null): number | null {
+  if (!point) return null
   const value = point.yhat_upper ?? point.upper
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-export function forecastTimestamp(point: ForecastPoint): string | null {
+export function forecastTimestamp(point?: ForecastPoint | null): string | null {
+  if (!point) return null
   return point.time ?? point.date ?? point.ds ?? null
 }
 

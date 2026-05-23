@@ -77,10 +77,10 @@ class FakeOpenAI:
 def _settings() -> Settings:
     return Settings(
         dashscope_api_key=SecretStr("test"),
-        llm_model_fast="qwen3.6-flash",
-        llm_model_fast_fallbacks="qwen3.5-flash,qwen3.6-flash-2026-04-16",
+        llm_model_fast="qwen3.5-flash",
+        llm_model_fast_fallbacks="qwen3.5-flash-2026-02-23",
         llm_model_reasoning="deepseek-v4-flash",
-        llm_model_reasoning_fallbacks="qwen3.6-flash",
+        llm_model_reasoning_fallbacks="qwen3.5-flash",
     )
 
 
@@ -99,9 +99,9 @@ def test_client_uses_dashscope_model_and_returns_usage() -> None:
     )
 
     assert result is not None
-    assert result.model == "qwen3.6-flash"
+    assert result.model == "qwen3.5-flash"
     assert result.input_tokens == 12
-    assert completions.calls[0]["model"] == "qwen3.6-flash"
+    assert completions.calls[0]["model"] == "qwen3.5-flash"
 
 
 def test_client_falls_back_to_next_model_on_token_limit() -> None:
@@ -119,8 +119,11 @@ def test_client_falls_back_to_next_model_on_token_limit() -> None:
     )
 
     assert result is not None
-    assert result.model == "qwen3.5-flash"
-    assert [call["model"] for call in completions.calls] == ["qwen3.6-flash", "qwen3.5-flash"]
+    assert result.model == "qwen3.5-flash-2026-02-23"
+    assert [call["model"] for call in completions.calls] == [
+        "qwen3.5-flash",
+        "qwen3.5-flash-2026-02-23",
+    ]
 
 
 def test_circuit_breaker_opens_after_five_failed_calls() -> None:

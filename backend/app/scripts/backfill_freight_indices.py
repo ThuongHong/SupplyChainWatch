@@ -12,12 +12,12 @@ from app.db.models import FreightIndex
 from app.db.session import SessionLocal
 from app.schemas.records import FreightIndexRecord
 
-MANUAL_BACKFILL_INDICES = {"FBX_GLOBAL", "WCI_GLOBAL"}
+MANUAL_BACKFILL_INDICES = {"BDI", "FBX_GLOBAL", "WCI_GLOBAL"}
 DEFAULT_SOURCE = "manual_freight_backfill"
 
 
 def parse_manual_freight_backfill(csv_text: str) -> list[FreightIndexRecord]:
-    """Parse manual FBX/WCI backfill CSV rows with provenance metadata."""
+    """Parse manual major freight-index backfill CSV rows with provenance metadata."""
     records: list[FreightIndexRecord] = []
     reader = csv.DictReader(csv_text.splitlines())
     for row_number, row in enumerate(reader, start=2):
@@ -86,7 +86,7 @@ def _parse_time(raw: str, *, row_number: int) -> datetime:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Backfill manual FBX/WCI freight index rows.")
+    parser = argparse.ArgumentParser(description="Backfill manual major freight index rows.")
     parser.add_argument("csv_path", type=Path)
     args = parser.parse_args()
     with SessionLocal() as db:

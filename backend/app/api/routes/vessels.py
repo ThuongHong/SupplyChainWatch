@@ -42,7 +42,7 @@ async def get_vessel_snapshot(
                 FROM vessel_positions vp
                 CROSS JOIN latest
                 WHERE latest.snapshot_time IS NOT NULL
-                  AND vp.time >= latest.snapshot_time - INTERVAL '15 minutes'
+                  AND vp.time >= latest.snapshot_time - INTERVAL '24 hours'
                 ORDER BY vp.mmsi, vp.time DESC
             )
             SELECT vp.time, vp.mmsi, vp.lat, vp.lon, vp.sog, vp.cog, vp.nav_status,

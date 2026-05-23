@@ -42,9 +42,27 @@ async def current_port_congestion(
             SELECT DISTINCT ON (pc.port_id)
                    pc.time, pc.port_id, p.name AS port_name,
                    pc.anchored_count, pc.moored_count, pc.underway_count,
-                   pc.total_in_area, pc.avg_dwell_hours, pc.median_speed
+                   pc.total_in_area, pc.avg_dwell_hours, pc.median_speed,
+                   pw_total.metric_value::int AS portwatch_n_total,
+                   pw_portcalls.metric_value::int AS portwatch_portcalls
             FROM port_congestion pc
             JOIN ports p ON p.id = pc.port_id
+            LEFT JOIN LATERAL (
+                SELECT pm.metric_value
+                FROM portwatch_metrics pm
+                WHERE pm.metric_name = 'daily_vessel_calls'
+                  AND pm.entity_name = p.name
+                ORDER BY pm.observed_at DESC
+                LIMIT 1
+            ) pw_total ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT pm.metric_value
+                FROM portwatch_metrics pm
+                WHERE pm.metric_name = 'portcalls'
+                  AND pm.entity_name = p.name
+                ORDER BY pm.observed_at DESC
+                LIMIT 1
+            ) pw_portcalls ON TRUE
             ORDER BY pc.port_id, pc.time DESC
             """))
     return rows_to_dicts(list(result.mappings().all()))

@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const readPage = (name: string) => readFileSync(join(root, name), 'utf8')
+const readComponent = (name: string) => readFileSync(join(root, '..', 'components', name), 'utf8')
 
 describe('real data default page behavior', () => {
   it('keeps Dashboard demo port risk and insights behind explicit demo mode', () => {
@@ -31,5 +32,14 @@ describe('real data default page behavior', () => {
     expect(source).toMatch(/demo=\{useDemoCorrelations\}/)
     expect(source).toMatch(/demo=\{useDemoAnomalies\}/)
     expect(source).toMatch(/No live anomaly rows/)
+  })
+
+  it('uses live freshness rows for sidebar status instead of hardcoded sync text', () => {
+    const source = readComponent('layout/Sidebar.tsx')
+
+    expect(source).toMatch(/apiClient\.dataFreshness/)
+    expect(source).toMatch(/queryKeys\.dataFreshness/)
+    expect(source).toMatch(/freshRows/)
+    expect(source).not.toMatch(/synced 2m ago/)
   })
 })

@@ -55,10 +55,6 @@ beat_schedule = {
         "task": "generate_insights",
         "schedule": crontab(minute=45),
     },
-    "enrich-top-insights-hourly": {
-        "task": "enrich_top_insights",
-        "schedule": crontab(minute=50),
-    },
     "enrich-watchlist-daily": {
         "task": "enrich_watchlist",
         "schedule": crontab(hour=6, minute=30),

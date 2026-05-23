@@ -3,6 +3,7 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card } from '../components/Card'
 import { Badge } from '../components/Badge'
 import { InsightRow, type InsightCategory } from '../components/InsightRow'
+import { Sparkline } from '../components/Sparkline'
 import {
   DataProvenance,
   EmptyState,
@@ -15,8 +16,12 @@ import {
   apiClient,
   type AnomalyResponse,
   type CorrelationCell,
+  type DataCoverageResponse,
+  type EntityRiskForecastResponse,
   type ForecastResponse,
   type InsightResponse,
+  type RiskScoreResponse,
+  type RiskStoryEventResponse,
   type StoryAnalyzeResponse,
   type StoryEntity,
 } from '../api/client'
@@ -43,10 +48,15 @@ type FeedInsight = {
   aiGenerated?: boolean
   model?: string | null
   metrics?: Record<string, unknown> | null
+  confidence?: number | null
+  attentionLevel?: string | null
+  eventType?: string | null
+  affectedEntities?: Array<Record<string, unknown>> | null
+  sourceMetrics?: Record<string, unknown> | null
 }
 
-const CATS: CatFilter[] = ['all', 'correlation', 'trend', 'anomaly', 'forecast']
-const CAT_LABELS: Record<CatFilter, string> = { all: 'All', correlation: 'Correlation', trend: 'Trend', anomaly: 'Anomaly', forecast: 'Forecast' }
+const CATS: CatFilter[] = ['all', 'port_risk', 'risk_story', 'data_quality', 'correlation', 'trend', 'anomaly', 'forecast']
+const CAT_LABELS: Record<CatFilter, string> = { all: 'All', port_risk: 'Port Risk', risk_story: 'Risk Story', data_quality: 'Data Quality', correlation: 'Correlation', trend: 'Trend', anomaly: 'Anomaly', forecast: 'Forecast' }
 
 const DEMO_INSIGHTS: FeedInsight[] = [
   { title: 'Demo trend', text: 'BDI surged over several sessions, a pattern to verify against live freight_indices data.', category: 'trend', time: 'demo', aiGenerated: false },
@@ -55,13 +65,25 @@ const DEMO_INSIGHTS: FeedInsight[] = [
 ]
 
 const normalizeCategory = (category?: string | null): InsightCategory => {
-  if (category === 'anomaly' || category === 'correlation' || category === 'forecast') return category
+  if (category === 'anomaly' || category === 'correlation' || category === 'forecast' || category === 'risk_story' || category === 'data_quality' || category === 'port_risk') return category
   return 'trend'
 }
 
 const insightText = (insight: InsightResponse) => insight.narrative_llm || insight.narrative
 const displayName = (name: string) => name === 'FBX_GLOBAL' ? 'FBX' : name === 'WCI_GLOBAL' ? 'WCI' : name
 const apiName = (label: string) => label === 'FBX' ? 'FBX_GLOBAL' : label === 'WCI' ? 'WCI_GLOBAL' : label
+const metricBadgeValue = (value: unknown): string => {
+  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  if (typeof value === 'string' || typeof value === 'boolean') return String(value)
+  if (value && typeof value === 'object') return 'structured'
+  return 'n/a'
+}
+
+const entityBadgeLabel = (entity: Record<string, unknown>): string => {
+  const name = entity.name ?? entity.id
+  const type = entity.type ? `${entity.type}: ` : ''
+  return `${type}${String(name ?? 'entity')}`
+}
 
 const corrToColor = (v: number | null) => {
   if (v == null) return 'var(--bg-hover)'
@@ -150,7 +172,7 @@ const ForecastCard: React.FC<{ name: string; forecast?: ForecastResponse; isLoad
             const bandPoints = usable.filter(item => item.lower != null && item.upper != null)
             const band = bandPoints.length > 1
               ? 'M' + bandPoints.map((item, i) => `${toX(i).toFixed(1)},${toY(item.upper ?? 0).toFixed(1)}`).join(' L') +
-                ' L' + bandPoints.slice().reverse().map((item, i) => `${toX(bandPoints.length - 1 - i).toFixed(1)},${toY(item.lower ?? 0).toFixed(1)}`).join(' L') + ' Z'
+              ' L' + bandPoints.slice().reverse().map((item, i) => `${toX(bandPoints.length - 1 - i).toFixed(1)},${toY(item.lower ?? 0).toFixed(1)}`).join(' L') + ' Z'
               : ''
             return (
               <>
@@ -179,6 +201,109 @@ const liveAnomalyEvents = (anomalies: AnomalyResponse[]) => anomalies.slice(0, 1
 })
 
 const SEV_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--accent)' }
+const riskTone = (severity?: string) => severity === 'high' ? 'danger' : severity === 'medium' ? 'warning' : 'success'
+const compactType = (type?: string) => (type ?? 'entity').replace(/_/g, ' ')
+
+const forecastRiskScore = (point: Record<string, unknown>): number | null => {
+  const value = point.risk_score ?? point.yhat ?? point.prediction ?? point.value
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+const CoverageRows: React.FC<{ rows: DataCoverageResponse[] }> = ({ rows }) => {
+  if (rows.length === 0) {
+    return <EmptyState title="No coverage rows" detail="Coverage appears after risk refresh records source depth for monitored entities." compact />
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {rows.slice(0, 4).map(row => (
+        <div key={`${row.source}-${row.entity_id}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(100px, 1fr) 70px 92px', gap: 8, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>{row.source}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{row.observed_rows} rows · {row.expected_days} expected days</div>
+          </div>
+          <Badge variant={row.missing_days > 10 ? 'danger' : row.missing_days > 0 ? 'warning' : 'success'}>{row.missing_days} gaps</Badge>
+          <Badge variant={row.freshness_status === 'fresh' ? 'success' : row.freshness_status === 'stale' ? 'danger' : 'warning'}>{row.freshness_status}</Badge>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const RiskStoryWorkbench: React.FC<{
+  entities: RiskScoreResponse[]
+  selectedEntityId: string
+  onSelectEntity: (id: string) => void
+  stories: RiskStoryEventResponse[]
+  coverage: DataCoverageResponse[]
+  forecast?: EntityRiskForecastResponse
+  loading: boolean
+}> = ({ entities, selectedEntityId, onSelectEntity, stories, coverage, forecast, loading }) => {
+  const selected = entities.find(row => row.entity_id === selectedEntityId) ?? entities[0]
+  const predictedScores = (forecast?.predictions ?? []).map(forecastRiskScore).filter((value): value is number => value != null)
+  const gapDays = coverage.reduce((sum, row) => sum + row.missing_days, 0)
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHeader
+        title="Risk Story Workbench"
+        sub={selected ? `${selected.entity_name} · ${compactType(selected.entity_type)} · ${Math.round(selected.score)}/100` : 'Waiting for ranked PortWatch entities'}
+        action={<DataProvenance mode={selected ? 'live' : loading ? 'loading' : 'empty'} source="Real risk stories, coverage, forecasts" />}
+      />
+      {entities.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          {entities.slice(0, 8).map(entity => (
+            <button key={entity.entity_id} onClick={() => onSelectEntity(entity.entity_id)} style={{
+              border: '1px solid var(--border-subtle)', borderRadius: 5, padding: '5px 9px', cursor: 'pointer',
+              background: selectedEntityId === entity.entity_id ? 'var(--accent-muted)' : 'var(--bg-elevated)',
+              color: selectedEntityId === entity.entity_id ? 'var(--accent-text)' : 'var(--text-secondary)',
+              fontSize: 11, fontWeight: 600,
+            }}>{entity.entity_name}</button>
+          ))}
+        </div>
+      )}
+      {loading ? <SkeletonBlock height={190} lines={5} /> : selected ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+              <Badge variant={riskTone(selected.severity)}>{selected.severity}</Badge>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Coverage gaps: {gapDays} days</span>
+            </div>
+            {stories.slice(0, 4).map(story => (
+              <div key={story.event_key} style={{ padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{story.event_type.replace(/_/g, ' ')} · {story.metric}</span>
+                  <Badge variant={riskTone(story.severity)}>{story.attention_level}</Badge>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55, marginTop: 4 }}>{story.narrative}</div>
+              </div>
+            ))}
+            {stories.length === 0 && <EmptyState title="No story events for selected entity" detail="No fabricated timeline; event detector needs enough feature snapshots and threshold movement." compact />}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <CoverageRows rows={coverage} />
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>Forecast readiness</span>
+                <Badge variant={forecast?.data_sufficiency_status === 'sufficient' ? 'success' : 'warning'}>{forecast?.data_sufficiency_status ?? 'unknown'}</Badge>
+              </div>
+              {forecast?.data_sufficiency_status === 'sufficient' && predictedScores.length > 0 ? (
+                <>
+                  <Sparkline data={predictedScores} color="var(--accent)" width={210} height={44} />
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 6 }}>
+                    Confidence {Math.round(forecast.confidence * 100)}% · train {forecast.train_window_start ?? 'n/a'} to {forecast.train_window_end ?? 'n/a'}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{forecast?.unavailable_reason ?? 'Need historical snapshots before forecast generation.'}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <EmptyState title="No ranked risk entities" detail="Run PortWatch collection and maritime risk scoring to unlock the workbench." compact />
+      )}
+    </Card>
+  )
+}
 
 const AnomalyTimeline: React.FC<{ anomalies: AnomalyResponse[]; demo: boolean }> = ({ anomalies, demo }) => {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
@@ -233,6 +358,7 @@ const StoryMode: React.FC = () => {
     queryFn: ({ signal }) => apiClient.storyAnalyze({ entity_a: pair.entityA, entity_b: pair.entityB, period_days: 90 }, { signal }),
     retry: false,
   })
+  const storyUsesTemplate = storyQuery.data?.narrative.includes('template summary is shown') ?? false
 
   return (
     <div>
@@ -249,7 +375,11 @@ const StoryMode: React.FC = () => {
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
           <Badge variant="accent">{pair.entityA.id}</Badge>
           <Badge variant="info">{pair.entityB.id}</Badge>
-          {storyQuery.data && <Badge variant="success">AI-generated</Badge>}
+          {storyQuery.data && (
+            <Badge variant={storyUsesTemplate ? 'default' : 'success'}>
+              {storyUsesTemplate ? 'Template' : 'AI-generated'}
+            </Badge>
+          )}
         </div>
         {storyQuery.isLoading && <SkeletonBlock height={100} />}
         {storyQuery.error && <ErrorPanel error={storyQuery.error} title="Story Mode unavailable" compact />}
@@ -287,6 +417,14 @@ export const InsightsHub: React.FC = () => {
     queryKey: queryKeys.anomalies(90),
     queryFn: ({ signal }) => apiClient.anomalies({ days: 90 }, { signal }),
   })
+  const portRiskQuery = useQuery({
+    queryKey: queryKeys.globalPortRisk(12),
+    queryFn: ({ signal }) => apiClient.globalPortRisk(12, { signal }),
+  })
+  const chokepointRiskQuery = useQuery({
+    queryKey: queryKeys.chokepointStress(12),
+    queryFn: ({ signal }) => apiClient.chokepointStress(12, { signal }),
+  })
 
   const supportedNames = useMemo(() => {
     const available = new Set((indicesQuery.data ?? []).map(row => row.index_name))
@@ -306,6 +444,30 @@ export const InsightsHub: React.FC = () => {
       retry: false,
     })),
   })
+  const [selectedRiskEntityId, setSelectedRiskEntityId] = useState('')
+  const riskEntities = useMemo(() => [
+    ...(portRiskQuery.data ?? []),
+    ...(chokepointRiskQuery.data ?? []),
+  ].sort((a, b) => b.score - a.score), [portRiskQuery.data, chokepointRiskQuery.data])
+  const activeRiskEntityId = selectedRiskEntityId && riskEntities.some(row => row.entity_id === selectedRiskEntityId)
+    ? selectedRiskEntityId
+    : riskEntities[0]?.entity_id || ''
+  const riskCoverageQuery = useQuery({
+    queryKey: queryKeys.riskCoverage(activeRiskEntityId || undefined),
+    queryFn: ({ signal }) => apiClient.riskCoverage(activeRiskEntityId || undefined, { signal }),
+    enabled: Boolean(activeRiskEntityId),
+  })
+  const riskStoriesQuery = useQuery({
+    queryKey: queryKeys.riskStories(activeRiskEntityId || undefined, 180, 8),
+    queryFn: ({ signal }) => apiClient.riskStories({ entity_id: activeRiskEntityId, days: 180, limit: 8 }, { signal }),
+    enabled: Boolean(activeRiskEntityId),
+  })
+  const riskForecastQuery = useQuery({
+    queryKey: activeRiskEntityId ? queryKeys.riskEntityForecast(activeRiskEntityId) : ['risk', 'forecast', 'no-entity'],
+    queryFn: ({ signal }) => apiClient.riskEntityForecast(activeRiskEntityId, { signal }),
+    enabled: Boolean(activeRiskEntityId),
+    retry: false,
+  })
 
   const liveFeed = useMemo<FeedInsight[]>(() => (insightsQuery.data ?? []).map((insight: InsightResponse) => ({
     title: insight.title,
@@ -315,6 +477,11 @@ export const InsightsHub: React.FC = () => {
     aiGenerated: Boolean(insight.narrative_llm),
     model: insight.narrative_model,
     metrics: insight.metrics,
+    confidence: insight.confidence,
+    attentionLevel: insight.attention_level,
+    eventType: insight.event_type,
+    affectedEntities: insight.affected_entities,
+    sourceMetrics: insight.source_metrics,
   })), [insightsQuery.data])
   const usingDemoFeed = shouldUseDemoRows({
     loading: insightsQuery.isLoading,
@@ -324,7 +491,7 @@ export const InsightsHub: React.FC = () => {
   })
   const feed = usingDemoFeed ? DEMO_INSIGHTS : liveFeed
   const filtered = catFilter === 'all' ? feed : feed.filter(item => item.category === catFilter)
-  const error = insightsQuery.error ?? indicesQuery.error ?? anomaliesQuery.error ?? correlationsQuery.error
+  const error = insightsQuery.error ?? indicesQuery.error ?? anomaliesQuery.error ?? correlationsQuery.error ?? portRiskQuery.error ?? chokepointRiskQuery.error ?? riskCoverageQuery.error ?? riskStoriesQuery.error ?? riskForecastQuery.error
   const labels = supportedNames.map(displayName)
   const useDemoCorrelations = shouldUseDemoRows({
     loading: correlationsQuery.isLoading,
@@ -368,7 +535,12 @@ export const InsightsHub: React.FC = () => {
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '-8px 0 10px 40px' }}>
                     <Badge variant="default">{insight.title}</Badge>
                     {insight.model && <Badge variant="info">{insight.model}</Badge>}
-                    {insight.metrics && Object.keys(insight.metrics).slice(0, 2).map(key => <Badge key={key} variant="default">{key}: {String(insight.metrics?.[key])}</Badge>)}
+                    {insight.attentionLevel && <Badge variant={insight.attentionLevel === 'urgent' ? 'danger' : insight.attentionLevel === 'watch' ? 'warning' : 'default'}>{insight.attentionLevel}</Badge>}
+                    {typeof insight.confidence === 'number' && <Badge variant="default">{Math.round(insight.confidence * 100)}% confidence</Badge>}
+                    {insight.eventType && <Badge variant="default">{insight.eventType.replace(/_/g, ' ')}</Badge>}
+                    {insight.affectedEntities?.slice(0, 2).map(entity => <Badge key={entityBadgeLabel(entity)} variant="accent">{entityBadgeLabel(entity)}</Badge>)}
+                    {insight.sourceMetrics?.source != null && <Badge variant="info">source: {String(insight.sourceMetrics.source)}</Badge>}
+                    {insight.metrics && Object.keys(insight.metrics).slice(0, 2).map(key => <Badge key={key} variant="default">{key}: {metricBadgeValue(insight.metrics?.[key])}</Badge>)}
                   </div>
                 </div>
               ))}
@@ -396,6 +568,16 @@ export const InsightsHub: React.FC = () => {
             {supportedNames.length === 0 && <EmptyState title="No forecast candidates" detail="The indices endpoint did not return BDI, FBX, WCI, or alternate series." />}
           </div>
         </Card>
+
+        <RiskStoryWorkbench
+          entities={riskEntities}
+          selectedEntityId={activeRiskEntityId}
+          onSelectEntity={setSelectedRiskEntityId}
+          stories={riskStoriesQuery.data ?? []}
+          coverage={riskCoverageQuery.data ?? []}
+          forecast={riskForecastQuery.data}
+          loading={portRiskQuery.isLoading || chokepointRiskQuery.isLoading || riskCoverageQuery.isLoading || riskStoriesQuery.isLoading || riskForecastQuery.isLoading}
+        />
 
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
           <Card style={{ padding: 16 }}>

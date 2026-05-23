@@ -2,13 +2,23 @@ import React from 'react'
 import { Badge } from './Badge'
 import { Icons } from './icons'
 
-export type InsightCategory = 'trend' | 'anomaly' | 'correlation' | 'forecast'
+export type InsightCategory =
+  | 'trend'
+  | 'anomaly'
+  | 'correlation'
+  | 'forecast'
+  | 'risk_story'
+  | 'data_quality'
+  | 'port_risk'
 
 const catConfig = {
   trend: { color: 'var(--chart-1)', bg: 'var(--accent-muted)', Icon: Icons.TrendingUp, label: 'Trend' },
   anomaly: { color: 'var(--danger)', bg: 'var(--danger-muted)', Icon: Icons.AlertTriangle, label: 'Anomaly' },
   correlation: { color: 'var(--chart-3)', bg: 'rgba(167,139,250,0.14)', Icon: Icons.GitBranch, label: 'Correlation' },
   forecast: { color: 'var(--chart-4)', bg: 'var(--warning-muted)', Icon: Icons.Target, label: 'Forecast' },
+  risk_story: { color: 'var(--accent)', bg: 'var(--accent-muted)', Icon: Icons.Activity, label: 'Risk Story' },
+  data_quality: { color: 'var(--info)', bg: 'var(--info-muted)', Icon: Icons.Info, label: 'Data Quality' },
+  port_risk: { color: 'var(--danger)', bg: 'var(--danger-muted)', Icon: Icons.Anchor, label: 'Port Risk' },
 }
 
 interface InsightRowProps {
@@ -21,7 +31,7 @@ interface InsightRowProps {
 export const InsightRow: React.FC<InsightRowProps> = ({ text, category, time, aiGenerated = false }) => {
   const cfg = catConfig[category]
   const Icon = cfg.Icon
-  const badgeVariant = category === 'anomaly' ? 'danger' : category === 'forecast' ? 'warning' : category === 'correlation' ? 'info' : 'accent'
+  const badgeVariant = category === 'anomaly' || category === 'port_risk' ? 'danger' : category === 'forecast' ? 'warning' : category === 'correlation' || category === 'data_quality' ? 'info' : 'accent'
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
       <div style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', background: cfg.bg, color: cfg.color, flexShrink: 0, marginTop: 1 }}>

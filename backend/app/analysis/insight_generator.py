@@ -13,6 +13,7 @@ def generate_insights(db: Session, limit: int = 10) -> int:
     created += _generate_index_change_insights(db, limit=max(1, limit // 2))
     created += _generate_anomaly_insights(db, limit=max(1, limit // 3))
     created += generate_risk_insights(db, limit=max(1, limit // 3))
+    created += _generate_source_health_insights(db, limit=max(1, limit // 4))
     created += _generate_forecast_insights(db, limit=max(1, limit - created))
     db.commit()
     return created
@@ -119,6 +120,66 @@ def _generate_forecast_insights(db: Session, limit: int) -> int:
                 ),
                 metrics={"prediction": final_prediction, "model_metrics": row["metrics"]},
                 priority=4,
+            )
+        )
+        created += 1
+    return created
+
+
+def _generate_source_health_insights(db: Session, limit: int) -> int:
+    result = db.execute(
+        text("""
+            SELECT source, entity_type, entity_id, entity_name, observed_rows,
+                   expected_days, missing_days, freshness_status, last_collection_status
+            FROM data_coverage
+            WHERE freshness_status <> 'fresh'
+               OR missing_days > 0
+               OR COALESCE(last_collection_status, 'success') <> 'success'
+            ORDER BY
+                CASE freshness_status WHEN 'stale' THEN 3 WHEN 'aging' THEN 2 ELSE 1 END DESC,
+                missing_days DESC,
+                observed_rows ASC
+            LIMIT :limit
+            """),
+        {"limit": limit},
+    )
+    created = 0
+    for row in result.mappings().all():
+        missing_days = int(row["missing_days"] or 0)
+        expected_days = int(row["expected_days"] or 0)
+        observed_rows = int(row["observed_rows"] or 0)
+        freshness = str(row["freshness_status"])
+        status = row["last_collection_status"]
+        entity_name = str(row["entity_name"])
+        source = str(row["source"])
+        status_text = f" Last collection status is {status}." if status else ""
+        db.add(
+            Insight(
+                category="data_quality",
+                event_type="source_health",
+                title=f"{source} coverage needs review for {entity_name}",
+                narrative=(
+                    f"{source} has {observed_rows} rows for {entity_name}, missing "
+                    f"{missing_days} of {expected_days} expected days. Source freshness is "
+                    f"{freshness}.{status_text}"
+                ),
+                metrics={
+                    "observed_rows": observed_rows,
+                    "expected_days": expected_days,
+                    "missing_days": missing_days,
+                    "freshness_status": freshness,
+                    "last_collection_status": status,
+                },
+                affected_entities=[
+                    {
+                        "type": row["entity_type"],
+                        "id": row["entity_id"],
+                        "name": entity_name,
+                    }
+                ],
+                source_metrics={"source": source},
+                attention_level="watch" if freshness == "stale" or missing_days > 0 else "monitor",
+                priority=7 if freshness == "stale" or missing_days >= 7 else 4,
             )
         )
         created += 1

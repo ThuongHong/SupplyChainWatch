@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import ssl
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -17,13 +19,20 @@ from app.collectors.aisstream import (
 )
 from app.collectors.base import BaseCollector, CollectorError
 from app.collectors.bunker_scraper import parse_bunker_prices
-from app.collectors.fbx_scraper import parse_index_value
+from app.collectors.fbx_scraper import parse_fbx_index_value, parse_index_value
 from app.collectors.fred import FRED_SERIES, FREDCollector
 from app.collectors.openmeteo import ROUTE_POINTS, OpenMeteoMarineCollector
 from app.collectors.portwatch import normalize_feature
+from app.collectors.wci_scraper import parse_wci_index_value
 from app.config import get_settings
 from app.schemas.records import FreightIndexRecord
 from app.scripts.backfill_freight_indices import parse_manual_freight_backfill
+from app.scripts.seed_public_freight_history import (
+    _extract_infogram_live_key,
+    _parse_fbx_live_data,
+    _parse_mts_wci,
+    _parse_stockq_bdi,
+)
 
 
 class DummyCollector(BaseCollector[FreightIndexRecord]):
@@ -48,20 +57,57 @@ def test_base_collector_validates_records() -> None:
     assert records[0].index_name == "BDI"
 
 
+def test_base_collector_marks_unexpected_exception_failed() -> None:
+    class ExplodingCollector(DummyCollector):
+        source = "exploding"
+
+        def collect(self) -> list[dict[str, Any]]:
+            raise RuntimeError("unexpected transport failure")
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.row: object | None = None
+            self.commits = 0
+
+        def add(self, row: object) -> None:
+            self.row = row
+
+        def commit(self) -> None:
+            self.commits += 1
+
+        def refresh(self, row: object) -> None:
+            self.row = row
+
+    db = FakeDb()
+
+    with pytest.raises(RuntimeError, match="unexpected transport failure"):
+        ExplodingCollector().run(db=db)  # type: ignore[arg-type]
+
+    log_row = cast(Any, db.row)
+    assert log_row is not None
+    assert log_row.status == "failed"
+    assert log_row.finished_at is not None
+    assert log_row.error == "unexpected transport failure"
+
+
 def test_parse_bunker_prices_from_table() -> None:
     html = """
-    <table>
-      <tr><td>SGP</td><td>VLSFO</td><td>$610.50</td></tr>
-      <tr><td>RTM</td><td>MGO</td><td>790</td></tr>
+    <table caption="VLSFO summary">
+      <tr><th>Singapore</th><td>$610.50</td><td>+2.00</td></tr>
+      <tr><th>Rotterdam</th><td>590</td><td>-1.00</td></tr>
+    </table>
+    <table caption="MGO summary">
+      <tr><th>Singapore</th><td>790</td><td>+1.50</td></tr>
     </table>
     """
 
     rows = parse_bunker_prices(html)
 
-    assert rows[0]["port_code"] == "SGP"
+    assert rows[0]["port_code"] == "SINGAPORE"
     assert rows[0]["fuel_type"] == "VLSFO"
     assert rows[0]["price_usd_per_ton"] == 610.50
-    assert len(rows) == 2
+    assert rows[2]["fuel_type"] == "MGO"
+    assert len(rows) == 3
 
 
 def test_parse_public_index_value_from_data_attribute() -> None:
@@ -69,6 +115,49 @@ def test_parse_public_index_value_from_data_attribute() -> None:
 
     assert rows[0]["index_name"] == "FBX_GLOBAL"
     assert rows[0]["value"] == pytest.approx(2510.45)
+
+
+def test_parse_public_index_value_ignores_full_page_numbers() -> None:
+    rows = parse_index_value(
+        "<html><body>May 2026 chart 2,510.45 footer 2025</body></html>",
+        "FBX_GLOBAL",
+        "test",
+    )
+
+    assert rows == []
+
+
+def test_parse_fbx_public_ticker_data() -> None:
+    rows = parse_fbx_index_value(
+        """
+        <script>
+        window.frProductIntroTickerData['x'] = [
+          {"label":"FBX","value":"$2,000","change":"+0.94%","positive":true},
+          {"label":"FBX01","value":"$2,814","change":"-0.51%","positive":false}
+        ];
+        </script>
+        """,
+        "freightos_fbx",
+    )
+
+    assert rows[0]["index_name"] == "FBX_GLOBAL"
+    assert rows[0]["value"] == 2000.0
+    assert rows[0]["metadata"]["parser"] == "freightos_ticker"
+
+
+def test_parse_wci_weekly_update_text() -> None:
+    rows = parse_wci_index_value(
+        """
+        <p>Our detailed assessment for Thursday, 21 May 2026 The Drewry World
+        Container Index (WCI) increased 6% to $2,712 per 40ft container.</p>
+        """,
+        "drewry_wci",
+    )
+
+    assert rows[0]["index_name"] == "WCI_GLOBAL"
+    assert rows[0]["value"] == 2712.0
+    assert rows[0]["time"] == datetime(2026, 5, 21, tzinfo=UTC)
+    assert rows[0]["metadata"]["parser"] == "drewry_weekly_update"
 
 
 def test_fred_collector_normalizes_observations(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,6 +252,96 @@ def test_manual_fbx_wci_backfill_parser_keeps_provenance() -> None:
     assert records[0].metadata["ingest_method"] == "manual_csv"
     assert records[0].metadata["provenance"] == "Drewry weekly public update"
     assert records[0].metadata["source_url"] == "https://www.drewry.co.uk/"
+
+
+def test_manual_backfill_accepts_bdi_rows() -> None:
+    records = parse_manual_freight_backfill(
+        "\n".join(
+            [
+                "time,index_name,value,source,source_url,provenance,note,provider_release_date",
+                (
+                    "2026-05-22,BDI,2991,public_stockq_bdi,"
+                    "https://en.stockq.org/index/BDI.php,StockQ Baltic Dry index public table,"
+                    "recent-history table,2026-05-22"
+                ),
+            ]
+        )
+    )
+
+    assert records[0].index_name == "BDI"
+    assert records[0].value == 2991
+    assert records[0].metadata is not None
+    assert records[0].metadata["source_url"] == "https://en.stockq.org/index/BDI.php"
+
+
+def test_public_seed_parsers_extract_major_freight_indices() -> None:
+    bdi_rows = _parse_stockq_bdi(
+        "2026/05/22 Baltic Dry 2991.00 2026/05/21 Baltic Dry 2964.00"
+    )
+    assert bdi_rows == [
+        (datetime(2026, 5, 21).date(), 2964.0),
+        (datetime(2026, 5, 22).date(), 2991.0),
+    ]
+
+    live_key = _extract_infogram_live_key(
+        "<script>window.infographicData="
+        + json.dumps(
+            {
+                "elements": {
+                    "content": {
+                        "content": {
+                            "entities": {
+                                "chart": {
+                                    "props": {
+                                        "chartData": {
+                                            "custom": {
+                                                "live": {
+                                                    "provider": "atlas_google_drive",
+                                                    "key": "live-key",
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        )
+        + ";</script>"
+    )
+    assert live_key == "live-key"
+
+    fbx_rows = _parse_fbx_live_data(
+        {
+            "data": [
+                [
+                    ["Date", "FBX", "FBX01"],
+                    ["2026-05-15", "$2,000.50", "$3,000.00"],
+                    ["2026-05-22", "$2,191", "$3,100.00"],
+                ]
+            ]
+        }
+    )
+    assert fbx_rows == [
+        (datetime(2026, 5, 15).date(), 2000.5),
+        (datetime(2026, 5, 22).date(), 2191.0),
+    ]
+
+    wci_rows = _parse_mts_wci(
+        """
+        2026-05-21 · 09:45 Drewry World Container Index: Week of May 21st
+        The Drewry World Container Index (WCI) increased 6% to $2,712 per 40ft container.
+        2026-05-14 · 09:45 Drewry World Container Index: Week of May 14th
+        The Drewry World Container Index (WCI) surged 12% to $2,553 per 40ft container.
+        © 2026 MTS Insights.
+        """
+    )
+    assert wci_rows == [
+        (datetime(2026, 5, 14).date(), 2553.0),
+        (datetime(2026, 5, 21).date(), 2712.0),
+    ]
 
 
 def test_manual_backfill_rejects_unsupported_index() -> None:

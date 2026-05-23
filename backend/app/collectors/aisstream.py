@@ -16,14 +16,18 @@ from app.schemas.records import VesselPositionRecord, VesselRecord
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
 GLOBAL_BOUNDING_BOX = [[[-90, -180], [90, 180]]]
 MONITORED_BOUNDING_BOXES = [
-    [[0.8, 103.4], [1.6, 104.2]],  # Singapore / Malacca east
-    [[30.8, 120.8], [31.7, 122.2]],  # Shanghai
+    [[0.8, 99.0], [6.5, 104.5]],  # Singapore & Strait of Malacca
+    [[29.5, 120.5], [32.0, 123.0]],  # Shanghai & Ningbo-Zhoushan
     [[51.5, 3.8], [52.3, 5.1]],  # Rotterdam
     [[33.3, -118.8], [34.1, -117.7]],  # Los Angeles / Long Beach
     [[29.7, 32.0], [31.5, 33.0]],  # Suez
     [[8.7, -80.1], [9.5, -79.3]],  # Panama
-    [[12.0, 32.0], [30.0, 44.0]],  # Red Sea
+    [[12.0, 32.0], [30.0, 44.0]],  # Red Sea & Bab-el-Mandeb
     [[40.0, 27.0], [47.5, 42.0]],  # Black Sea
+    [[22.2, 113.7], [22.8, 114.6]],  # Shenzhen
+    [[34.9, 128.8], [35.4, 129.3]],  # Busan
+    [[53.3, 9.6], [54.0, 10.3]],  # Hamburg
+    [[24.8, 54.8], [27.2, 57.5]],  # Strait of Hormuz & Jebel Ali
 ]
 
 
@@ -36,7 +40,7 @@ class AISStreamCollector(BaseCollector[BaseModel]):
     def __init__(
         self,
         *,
-        sample_seconds: float = 30,
+        sample_seconds: float = 600,
         max_records: int = 1000,
         watchlist_mmsi: set[int] | None = None,
         **kwargs: Any,
@@ -80,9 +84,7 @@ class AISStreamCollector(BaseCollector[BaseModel]):
     ) -> list[dict[str, Any]]:
         subscribe_message = {
             "APIKey": api_key,
-            "BoundingBoxes": (
-                MONITORED_BOUNDING_BOXES if not self.watchlist_mmsi else GLOBAL_BOUNDING_BOX
-            ),
+            "BoundingBoxes": MONITORED_BOUNDING_BOXES,
             "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
         }
 
@@ -94,6 +96,8 @@ class AISStreamCollector(BaseCollector[BaseModel]):
             async with websockets.connect(AISSTREAM_URL, open_timeout=10) as websocket:
                 await websocket.send(json.dumps(subscribe_message))
                 while True:
+                    if position_count >= max_records:
+                        break
                     remaining = deadline - asyncio.get_running_loop().time()
                     if remaining <= 0:
                         break
@@ -104,6 +108,8 @@ class AISStreamCollector(BaseCollector[BaseModel]):
 
                     parsed = _parse_stream_message(json.loads(_message_to_text(message_json)))
                     for row in parsed:
+                        if not is_relevant_ais_row(row, self.watchlist_mmsi):
+                            continue
                         if row.get("_record_type") == "vessel":
                             if static_count < max_records:
                                 rows.append(row)

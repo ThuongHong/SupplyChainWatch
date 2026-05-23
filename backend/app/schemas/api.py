@@ -79,6 +79,9 @@ class PortCongestionResponse(BaseModel):
     total_in_area: int
     avg_dwell_hours: float | None = None
     median_speed: float | None = None
+    # PortWatch trade metrics — supplementary, present when PortWatch has data for this port
+    portwatch_n_total: int | None = None
+    portwatch_portcalls: int | None = None
 
 
 class ChokepointResponse(BaseModel):

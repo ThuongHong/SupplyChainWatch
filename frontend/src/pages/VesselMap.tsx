@@ -151,12 +151,12 @@ function isDisabledSourceError(error: unknown): boolean {
   return /disabled|not configured|missing|api key|aisstream/i.test(detail)
 }
 
-function vesselStatusLabel(status: VesselSourceStatus, watchlistCount: number): string {
+function vesselStatusLabel(status: VesselSourceStatus): string {
   if (status === 'loading') return 'Loading AIS'
   if (status === 'disabled') return 'AIS Disabled'
   if (status === 'error') return 'Source Error'
   if (status === 'empty') return 'Empty AIS'
-  return watchlistCount ? 'Watchlist AIS' : 'Risk-area AIS'
+  return 'Monitored AIS'
 }
 
 function vesselStatusVariant(status: VesselSourceStatus): 'success' | 'warning' | 'danger' | 'default' {
@@ -164,6 +164,23 @@ function vesselStatusVariant(status: VesselSourceStatus): 'success' | 'warning' 
   if (status === 'error') return 'danger'
   if (status === 'loading' || status === 'disabled') return 'warning'
   return 'default'
+}
+
+function vesselStoryText(
+  vessel: Vessel,
+  trackCount: number,
+  watchlist?: VesselWatchlistResponse,
+  etaDrift?: VesselEtaDriftResponse,
+  anomalies: AnomalyResponse[] = [],
+): string {
+  const reason = watchlist?.reason ?? 'selected from current AIS viewport'
+  const eta = etaDrift?.eta_drift_minutes == null
+    ? 'No ETA drift estimate is available yet'
+    : `ETA drift is ${etaDrift.eta_drift_minutes} minutes at ${Math.round(etaDrift.confidence * 100)}% confidence`
+  const anomaly = anomalies.length
+    ? `${anomalies.length} active anomaly marker${anomalies.length === 1 ? '' : 's'} require review`
+    : 'no active vessel anomaly markers are attached'
+  return `${vessel.name} is moving at ${vessel.speed} kn near ${vessel.lat.toFixed(2)}, ${vessel.lon.toFixed(2)}. It is tracked because ${reason}; ${eta}, and ${anomaly}. Track evidence: ${trackCount} AIS point${trackCount === 1 ? '' : 's'}.`
 }
 
 // ---- Symbol Icon ----
@@ -641,6 +658,7 @@ const VesselDrawer: React.FC<{
   const minY = trackPts.length ? Math.min(...trackPts.map(p => p.y)) : 0
   const maxY = trackPts.length ? Math.max(...trackPts.map(p => p.y)) : 1
   const rx = maxX - minX || 1, ry = maxY - minY || 1
+  const story = vesselStoryText(vessel, realTrack.length, watchlist, etaDrift, anomalies)
 
   return (
     <div style={{
@@ -687,6 +705,10 @@ const VesselDrawer: React.FC<{
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
           {realTrack.length > 1 ? `${realTrack.length} API track points` : 'No detail track returned by API.'}
+        </div>
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>Vessel Story</div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{story}</div>
         </div>
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
           <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>Operational Context</div>
@@ -837,14 +859,9 @@ export const VesselMap: React.FC = () => {
     queryFn: ({ signal }) => apiClient.vesselWatchlist({ signal }),
     refetchInterval: 60_000,
   })
-  const watchlistMmsi = useMemo(
-    () => new Set((watchlistQuery.data ?? []).map(item => item.mmsi)),
-    [watchlistQuery.data],
-  )
   const vessels = useMemo(() => {
-    const mapped = (vesselQuery.data ?? []).map(mapApiVessel)
-    return watchlistMmsi.size ? mapped.filter(vessel => watchlistMmsi.has(Number(vessel.mmsi))) : mapped
-  }, [vesselQuery.data, watchlistMmsi])
+    return (vesselQuery.data ?? []).map(mapApiVessel)
+  }, [vesselQuery.data])
 
   const typeCounts = useMemo(() => {
     const counts = emptyTypeCounts()
@@ -904,9 +921,9 @@ export const VesselMap: React.FC = () => {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0 }}>
         <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 8, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 10, boxShadow: 'var(--shadow-md)', zIndex: 5 }}>
           <Icons.Globe size={14} style={{ color: 'var(--accent)' } as React.CSSProperties} />
-          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>GlobalSupplyWatch · Selective Vessel Drilldown</span>
-          <Badge variant={vesselStatusVariant(status)}>{vesselStatusLabel(status, watchlistMmsi.size)}</Badge>
-          <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{filtered.length.toLocaleString()} shown · {watchlistMmsi.size} watchlist</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>GlobalSupplyWatch · Monitored Port Traffic</span>
+          <Badge variant={vesselStatusVariant(status)}>{vesselStatusLabel(status)}</Badge>
+          <span className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{filtered.length.toLocaleString()} vessels in view</span>
           <div aria-label="Map display mode" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 7, background: 'rgba(2,6,23,0.42)', border: '1px solid var(--border-subtle)' }}>
             <button
               type="button"
@@ -957,12 +974,12 @@ export const VesselMap: React.FC = () => {
         )}
         {status === 'disabled' && (
           <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>
-            <EmptyState title="AIS source disabled" detail="Configure AISStream credentials and run selective collection to populate watchlist vessel rows." compact />
+            <EmptyState title="AIS source disabled" detail="Configure AISStream credentials and run the AIS collector to load vessel positions." compact />
           </div>
         )}
         {status === 'empty' && (
           <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>
-            <EmptyState title="No watchlist AIS rows in this viewport" detail="Normal mode does not render demo vessels; refresh watchlist rules, run AIS collectors, or zoom out." compact />
+            <EmptyState title="No AIS vessels in this viewport" detail="Zoom out or trigger the AIS collector to load real-time vessel positions for monitored ports." compact />
           </div>
         )}
         {selectedVessel && (

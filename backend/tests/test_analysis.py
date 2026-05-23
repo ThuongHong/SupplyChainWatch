@@ -5,11 +5,42 @@ import pytest
 from app.analysis.anomaly import rolling_z_score, severity_from_z_score
 from app.analysis.correlation import correlation_matrix, pearson_correlation
 from app.analysis.forecast import _moving_average
+from app.analysis.insight_generator import _generate_source_health_insights
 from app.analysis.maritime_risk import (
     economic_pressure_context,
     score_components,
     weather_route_impact,
 )
+
+
+class FakeMappings:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def all(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeResult:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def mappings(self) -> FakeMappings:
+        return FakeMappings(self.rows)
+
+
+class FakeInsightDb:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.added: list[object] = []
+        self.params: dict[str, object] | None = None
+
+    def execute(self, statement: object, params: dict[str, object]) -> FakeResult:
+        self.params = params
+        return FakeResult(self.rows)
+
+    def add(self, row: object) -> None:
+        self.added.append(row)
 
 
 def test_pearson_correlation_detects_linear_relationship() -> None:
@@ -80,3 +111,31 @@ def test_weather_and_economic_context_scores() -> None:
 
     assert weather["score"] == pytest.approx(50.0)
     assert economic["severity"] in {"medium", "high"}
+
+
+def test_source_health_insights_explain_coverage_gaps() -> None:
+    db = FakeInsightDb(
+        [
+            {
+                "source": "portwatch_ports",
+                "entity_type": "port",
+                "entity_id": "port-sgsin",
+                "entity_name": "Singapore",
+                "observed_rows": 84,
+                "expected_days": 90,
+                "missing_days": 12,
+                "freshness_status": "stale",
+                "last_collection_status": "failed",
+            }
+        ]
+    )
+
+    created = _generate_source_health_insights(db, limit=3)  # type: ignore[arg-type]
+
+    assert created == 1
+    assert db.params == {"limit": 3}
+    insight = db.added[0]
+    assert insight.category == "data_quality"
+    assert insight.event_type == "source_health"
+    assert "missing 12 of 90 expected days" in insight.narrative
+    assert insight.attention_level == "watch"
