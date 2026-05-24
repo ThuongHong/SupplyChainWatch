@@ -221,6 +221,7 @@ interface RealMapProps {
   onViewport: (bbox: string) => void
   layers: { vessels: boolean; heatmap: boolean; ports: boolean }
   mapMode: MapMode
+  anomalies: AnomalyResponse[]
 }
 
 const REAL_MAP_STYLE: maplibregl.StyleSpecification = {
@@ -262,18 +263,27 @@ function vesselsToGeoJson(vessels: Vessel[]): FeatureCollection<PointFeature> {
   }
 }
 
-function portsToGeoJson(): FeatureCollection<PointFeature> {
+function portsToGeoJson(anomalies: AnomalyResponse[] = []): FeatureCollection<PointFeature> {
   return {
     type: 'FeatureCollection',
-    features: PORT_DATA.map(port => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [port.lon, port.lat] },
-      properties: {
-        name: port.name,
-        congestion: port.congestion,
-        color: port.congestion === 'high' ? '#EF4444' : port.congestion === 'medium' ? '#EAB308' : '#22C55E',
-      },
-    })),
+    features: PORT_DATA.map((port, index) => {
+      const portAnomalies = anomalies.filter(
+        a => a.port_name?.toLowerCase() === port.name.toLowerCase() ||
+             (a.port_id && a.port_id === index + 1)
+      )
+      const activeAnomaly = portAnomalies.find(a => a.severity === 'high' || a.severity === 'medium')
+      const level = activeAnomaly ? (activeAnomaly.severity as 'high' | 'medium') : 'low'
+      return {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [port.lon, port.lat] },
+        properties: {
+          name: port.name,
+          congestion: level,
+          color: level === 'high' ? '#EF4444' : level === 'medium' ? '#EAB308' : '#22C55E',
+          hasAnomaly: !!activeAnomaly,
+        },
+      }
+    }),
   }
 }
 
@@ -365,7 +375,7 @@ function applyMapMode(map: maplibregl.Map, mapMode: MapMode): void {
   }
 }
 
-const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, onViewport, layers, mapMode }) => {
+const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, onViewport, layers, mapMode, anomalies }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const popupRef = useRef<maplibregl.Popup | null>(null)
@@ -396,7 +406,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
 
     map.on('load', () => {
       addVesselIcons(map)
-      map.addSource('ports', { type: 'geojson', data: portsToGeoJson() })
+      map.addSource('ports', { type: 'geojson', data: portsToGeoJson(anomalies) })
       map.addLayer({
         id: 'port-halos',
         type: 'circle',
@@ -554,6 +564,14 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
     ;(map?.getSource('vessels') as maplibregl.GeoJSONSource | undefined)?.setData(data)
     ;(map?.getSource('vessel-heat') as maplibregl.GeoJSONSource | undefined)?.setData(data)
   }, [ready, vessels])
+
+  useEffect(() => {
+    if (!ready) return
+    const map = mapRef.current
+    if (!map) return
+    const data = portsToGeoJson(anomalies)
+    ;(map.getSource('ports') as maplibregl.GeoJSONSource | undefined)?.setData(data)
+  }, [ready, anomalies])
 
   useEffect(() => {
     if (!ready || vessels.length === 0 || hasFitVesselBoundsRef.current) return
@@ -854,6 +872,11 @@ export const VesselMap: React.FC = () => {
     queryFn: ({ signal }) => apiClient.vesselSnapshot({ bbox, limit: 5000 }, { signal }),
     refetchInterval: 60_000,
   })
+  const anomaliesQuery = useQuery({
+    queryKey: queryKeys.anomalies(30),
+    queryFn: ({ signal }) => apiClient.anomalies({ days: 30 }, { signal }),
+  })
+  const anomalies = anomaliesQuery.data ?? []
   const watchlistQuery = useQuery({
     queryKey: queryKeys.vesselWatchlist,
     queryFn: ({ signal }) => apiClient.vesselWatchlist({ signal }),
@@ -965,7 +988,7 @@ export const VesselMap: React.FC = () => {
             </button>
           </div>
         </div>
-        <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} onViewport={updateViewport} layers={layers} mapMode={mapMode} />
+        <VesselRealMap vessels={filtered} selectedId={selectedId} onSelect={setSelectedId} onViewport={updateViewport} layers={layers} mapMode={mapMode} anomalies={anomalies} />
         <VesselStatsOverlay vessels={filtered} />
         {sourceError && status !== 'disabled' && (
           <div style={{ position: 'absolute', left: 230, top: 64, width: 360, zIndex: 8 }}>

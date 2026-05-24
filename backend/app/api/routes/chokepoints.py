@@ -18,8 +18,13 @@ async def list_chokepoints(
     db: Annotated[AsyncSession, Depends(get_async_db)],
 ) -> list[dict[str, object]]:
     result = await db.execute(text("""
-            SELECT c.id, c.name, latest.time, latest.vessel_count,
-                   latest.median_speed, latest.risk_score
+            SELECT c.id, c.name, latest.time,
+                   COALESCE(
+                       CASE WHEN COALESCE(latest.vessel_count, 0) > 0 THEN latest.vessel_count ELSE NULL END,
+                       pw_latest.metric_value::int
+                   ) AS vessel_count,
+                   latest.median_speed,
+                   latest.risk_score
             FROM chokepoints c
             LEFT JOIN LATERAL (
                 SELECT cs.time, cs.vessel_count, cs.median_speed, cs.risk_score
@@ -28,6 +33,14 @@ async def list_chokepoints(
                 ORDER BY cs.time DESC
                 LIMIT 1
             ) latest ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT pm.metric_value
+                FROM portwatch_metrics pm
+                WHERE pm.entity_name = c.name
+                  AND pm.metric_name = 'n_total'
+                ORDER BY pm.observed_at DESC
+                LIMIT 1
+            ) pw_latest ON TRUE
             ORDER BY c.name
             """))
     return rows_to_dicts(list(result.mappings().all()))

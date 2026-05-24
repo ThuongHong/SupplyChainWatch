@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analysis.anomaly import compute_port_historical_anomalies_async
 from app.analysis.correlation import correlation_matrix
 from app.api.routes.helpers import rows_to_dicts
 from app.db.session import get_async_db
@@ -20,20 +21,50 @@ async def list_anomalies(
     db: Annotated[AsyncSession, Depends(get_async_db)],
     days: Annotated[int, Query(ge=1, le=365)] = 30,
     severity: Annotated[str | None, Query()] = None,
+    port_id: Annotated[int | None, Query()] = None,
+    limit: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[dict[str, object]]:
+    # 1. Compute dynamic historical port anomalies
+    port_anomalies = await compute_port_historical_anomalies_async(
+        db, days=days, severity=severity, port_id=port_id
+    )
+
+    # 2. If port_id is specified, we ONLY return port anomalies (no index anomalies)
+    if port_id is not None:
+        if limit is not None:
+            return port_anomalies[:limit]
+        return port_anomalies
+
+    # 3. Otherwise, query non-port anomalies from the anomalies table
     result = await db.execute(
         text("""
             SELECT id, detected_at, entity_type, entity_id, severity, metric,
                    observed, expected, z_score, description, explanation, acknowledged
             FROM anomalies
             WHERE detected_at >= NOW() - (:days * INTERVAL '1 day')
+              AND entity_type <> 'port'
               AND (CAST(:severity AS TEXT) IS NULL OR severity = :severity)
             ORDER BY detected_at DESC
             LIMIT 500
             """),
         {"days": days, "severity": severity},
     )
-    return rows_to_dicts(list(result.mappings().all()))
+    db_anomalies = rows_to_dicts(list(result.mappings().all()))
+
+    # 4. Merge lists and sort by detected_at descending
+    merged = list(port_anomalies) + db_anomalies
+
+    # Sort by detected_at descending
+    merged.sort(key=lambda x: x["detected_at"], reverse=True)
+
+    if limit is not None:
+        merged = merged[:limit]
+
+    # Re-assign IDs to be unique
+    for i, item in enumerate(merged):
+        item["id"] = i + 1
+
+    return merged
 
 
 @router.get("/insights/latest", response_model=list[InsightResponse])

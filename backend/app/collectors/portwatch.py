@@ -12,7 +12,23 @@ FEATURE_PAGE_SIZE = 1000
 RECENT_FEATURE_SAMPLE_SIZE = 200
 OBJECT_ID_BATCH_SIZE = 50
 
-PORTWATCH_TARGET_PORTIDS = ("port1201", "port1188", "port2027", "port1114", "port664")
+PORTWATCH_TARGET_PORTIDS = (
+    "port1201",
+    "port1188",
+    "port2027",
+    "port1114",
+    "port664",
+    "port824",
+    "port1429",
+    "port1189",
+    "port830",
+    "port744",
+    "port446",
+    "port192",
+    "port31",
+    "port815",
+    "port1170",
+)
 PORTSTRAITWATCH_TARGET_PORTIDS = (
     "chokepoint1",
     "chokepoint2",
@@ -28,6 +44,16 @@ PORTWATCH_SOURCE_ID_TO_ENTITY = {
     "port2027": PORTWATCH_ENTITY_BY_ID["port-cnsha"],
     "port1114": PORTWATCH_ENTITY_BY_ID["port-nlrtm"],
     "port664": PORTWATCH_ENTITY_BY_ID["port-uslax"],
+    "port824": PORTWATCH_ENTITY_BY_ID["port-cnngb"],
+    "port1429": PORTWATCH_ENTITY_BY_ID["port-cnngb"],
+    "port1189": PORTWATCH_ENTITY_BY_ID["port-cnszx"],
+    "port830": PORTWATCH_ENTITY_BY_ID["port-krpus"],
+    "port744": PORTWATCH_ENTITY_BY_ID["port-aejea"],
+    "port446": PORTWATCH_ENTITY_BY_ID["port-deham"],
+    "port192": PORTWATCH_ENTITY_BY_ID["port-egpsd"],
+    "port31": PORTWATCH_ENTITY_BY_ID["port-esalg"],
+    "port815": PORTWATCH_ENTITY_BY_ID["port-usnyc"],
+    "port1170": PORTWATCH_ENTITY_BY_ID["port-ussav"],
     "chokepoint1": PORTWATCH_ENTITY_BY_ID["cp-suez"],
     "chokepoint2": PORTWATCH_ENTITY_BY_ID["cp-panama"],
     "chokepoint3": PORTWATCH_ENTITY_BY_ID["region-red-sea"],
@@ -54,10 +80,32 @@ class PortWatchFeatureAdapter:
                 since_date = (datetime.now(UTC) - timedelta(days=history_days)).strftime("%Y-%m-%d")
                 ids_str = ", ".join(f"'{i}'" for i in ids)
                 where_clause = f"portid IN ({ids_str}) AND date >= '{since_date}'"
-
-                features = self._fetch_filtered_pages(url, where_clause)
-                if features:
-                    return features
+                try:
+                    features = self._fetch_filtered_pages(url, where_clause)
+                    if features:
+                        return features
+                except Exception as e:
+                    import structlog
+                    structlog.get_logger(__name__).warning(
+                        "portwatch_bulk_query_failed_falling_back_to_individual",
+                        error=str(e),
+                        url=url,
+                    )
+                    features = []
+                    for entity_id in ids:
+                        individual_clause = f"portid = '{entity_id}' AND date >= '{since_date}'"
+                        try:
+                            port_features = self._fetch_filtered_pages(url, individual_clause)
+                            if port_features:
+                                features.extend(port_features)
+                        except Exception as ind_exc:
+                            structlog.get_logger(__name__).warning(
+                                "portwatch_individual_query_failed",
+                                error=str(ind_exc),
+                                entity_id=entity_id,
+                            )
+                    if features:
+                        return features
 
         # Fallback to the original objectId-based query for backward compatibility and tests
         object_ids = self._recent_object_ids(url)
@@ -169,15 +217,17 @@ class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
         ):
             try:
                 features = self.adapter.fetch_features(url)
-            except CollectorError:
-                if self.use_demo_fallback:
+            except Exception as e:
+                if self.use_demo_fallback or settings.backend_demo_fallback_enabled:
+                    import structlog
+                    structlog.get_logger(__name__).warning("portwatch_fetch_failed_using_fallback", error=str(e))
                     return demo_portwatch_rows()
                 raise
             for feature in features:
                 rows.extend(normalize_feature(feature, entity_hint=entity_hint, source=source))
 
         if not rows:
-            if self.use_demo_fallback:
+            if self.use_demo_fallback or settings.backend_demo_fallback_enabled:
                 return demo_portwatch_rows()
             return []
 
@@ -250,32 +300,46 @@ def normalize_feature(
 
 
 def demo_portwatch_rows(now: datetime | None = None) -> list[dict[str, Any]]:
-    observed_at = now or datetime.now(UTC) - timedelta(days=1)
+    import random
+    random.seed(42)
+    base_date = now or datetime.now(UTC)
     rows: list[dict[str, Any]] = []
-    for index, entity in enumerate(PORTWATCH_ENTITIES):
-        base = 70 + index * 8
-        metrics = {
-            "daily_vessel_calls": base,
-            "trade_volume_index": 100 - index * 3,
-            "traffic_anomaly_index": 8 + index * 4,
-        }
-        if entity.entity_type != "port":
-            metrics["transit_capacity_index"] = 95 - index * 2
-        for metric_name, value in metrics.items():
-            rows.append(
-                {
-                    "observed_at": observed_at,
-                    "entity_type": entity.entity_type,
-                    "entity_id": entity.entity_id,
-                    "entity_name": entity.name,
-                    "metric_name": metric_name,
-                    "metric_value": float(value),
-                    "unit": "index" if metric_name.endswith("_index") else "count",
-                    "source": "portwatch_demo",
-                    "source_entity_id": entity.locode or entity.entity_id,
-                    "metadata": {"fallback": True},
-                }
-            )
+    
+    # Generate 90 days of daily historical records per entity
+    for d in range(90):
+        observed_at = base_date - timedelta(days=d)
+        for index, entity in enumerate(PORTWATCH_ENTITIES):
+            base = 70 + index * 8
+            # Add a bit of random variation to simulate realistic trends and z-score standard deviation
+            variation = random.uniform(-4.0, 4.0)
+            
+            # Intentionally inject significant spikes on specific days to trigger z-score anomalies >= 2.0 / 3.0
+            if d in (5, 20):
+                variation += 25.0  # Anomaly spike
+            
+            metrics = {
+                "daily_vessel_calls": base + variation,
+                "trade_volume_index": max(10.0, 100 - index * 3 - variation * 0.5),
+                "traffic_anomaly_index": max(0.0, 8 + index * 4 + variation * 0.2),
+            }
+            if entity.entity_type != "port":
+                metrics["transit_capacity_index"] = max(10.0, 95 - index * 2 - variation * 0.4)
+                
+            for metric_name, value in metrics.items():
+                rows.append(
+                    {
+                        "observed_at": observed_at,
+                        "entity_type": entity.entity_type,
+                        "entity_id": entity.entity_id,
+                        "entity_name": entity.name,
+                        "metric_name": metric_name,
+                        "metric_value": float(value),
+                        "unit": "index" if metric_name.endswith("_index") else "count",
+                        "source": "portwatch_demo",
+                        "source_entity_id": entity.locode or entity.entity_id,
+                        "metadata": {"fallback": True},
+                    }
+                )
     return rows
 
 

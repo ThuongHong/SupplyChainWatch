@@ -139,3 +139,52 @@ def test_source_health_insights_explain_coverage_gaps() -> None:
     assert insight.event_type == "source_health"
     assert "missing 12 of 90 expected days" in insight.narrative
     assert insight.attention_level == "watch"
+
+
+def test_compute_port_historical_anomalies() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.analysis.anomaly import compute_port_historical_anomalies
+
+    now = datetime.now(UTC)
+    # Generate baseline data: 9 points over the last 9 days
+    rows = []
+    for i in range(1, 10):
+        rows.append(
+            {
+                "time": now - timedelta(days=10 - i),
+                "port_id": 1,
+                "port_name": "Test Port",
+                "anchored_count": 5 + (i % 2),  # alternates 5 and 6
+                "moored_count": 2,
+                "underway_count": 3,
+                "total_in_area": 10 + (i % 2),  # alternates 10 and 11
+                "avg_dwell_hours": 12.0,
+                "median_speed": 5.0,
+            }
+        )
+    # Add a tenth point (today) that has high congestion
+    rows.append(
+        {
+            "time": now,
+            "port_id": 1,
+            "port_name": "Test Port",
+            "anchored_count": 35,
+            "moored_count": 2,
+            "underway_count": 3,
+            "total_in_area": 40,
+            "avg_dwell_hours": 48.0,
+            "median_speed": 1.0,
+        }
+    )
+
+    db = FakeInsightDb(rows)
+    anomalies = compute_port_historical_anomalies(db, days=30)  # type: ignore[arg-type]
+
+    # There should be detected anomalies
+    assert len(anomalies) > 0
+    latest_anomaly = anomalies[0]
+    assert latest_anomaly["port_name"] == "Test Port"
+    assert latest_anomaly["severity"] in ("medium", "high")
+    assert latest_anomaly["anomaly_score"] > 2.0
+    assert latest_anomaly["port_id"] == 1

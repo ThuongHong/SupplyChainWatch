@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import type { PortCongestionResponse } from '../api/client'
-import { congestionSeverity } from '../api/viewModels'
+import type { PortCongestionResponse, AnomalyResponse } from '../api/client'
+import { Icons } from './icons'
 
 export const PORT_DATA = [
   { name: 'Shanghai', lat: 31.2, lon: 121.5, congestion: 'high' as const },
@@ -17,19 +17,32 @@ export const PORT_DATA = [
   { name: 'Hong Kong', lat: 22.3, lon: 114.2, congestion: 'low' as const },
 ]
 
-const congColor = { low: 'var(--cong-low)', medium: 'var(--cong-med)', high: 'var(--cong-high)' }
-const congHex = { low: '#22C55E', medium: '#EAB308', high: '#EF4444' }
+const congColor: Record<string, string> = { low: 'var(--cong-low)', medium: 'var(--cong-med)', high: 'var(--cong-high)' }
+const congHex: Record<string, string> = { low: '#22C55E', medium: '#EAB308', high: '#EF4444' }
 
 interface MiniMapProps {
   width?: number
   height?: number
   congestion?: PortCongestionResponse[]
+  anomalies?: AnomalyResponse[]
 }
 
-export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 200, congestion = [] }) => {
+export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 200, congestion = [], anomalies = [] }) => {
   const [hoverPort, setHoverPort] = useState<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
+
+  const currentPorts = useMemo(() => {
+    return PORT_DATA.map((port, index) => {
+      const portAnomalies = anomalies.filter(
+        a => a.port_name?.toLowerCase() === port.name.toLowerCase() ||
+             (a.port_id && a.port_id === index + 1)
+      )
+      const activeAnomaly = portAnomalies.find(a => a.severity === 'high' || a.severity === 'medium')
+      const level = activeAnomaly ? (activeAnomaly.severity as 'high' | 'medium') : 'low'
+      return { ...port, congestion: level, hasAnomaly: !!activeAnomaly }
+    })
+  }, [anomalies])
 
   useEffect(() => {
     const container = containerRef.current
@@ -65,11 +78,6 @@ export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 20
     map.touchZoomRotate.disable()
     map.keyboard.disable()
     mapRef.current = map
-
-    const currentPorts = PORT_DATA.map(port => {
-      const row = congestion.find(item => item.port_name?.toLowerCase() === port.name.toLowerCase())
-      return row ? { ...port, congestion: congestionSeverity(row) } : port
-    })
 
     map.on('load', () => {
       map.addSource('ports-mini', {
@@ -142,7 +150,27 @@ export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 20
       map.remove()
       mapRef.current = null
     }
-  }, [congestion])
+  }, [])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const source = map.getSource('ports-mini') as maplibregl.GeoJSONSource | undefined
+    if (!source) return
+    source.setData({
+      type: 'FeatureCollection',
+      features: currentPorts.map((port, index) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [port.lon, port.lat] },
+        properties: {
+          index,
+          name: port.name,
+          congestion: port.congestion,
+          color: congHex[port.congestion],
+        },
+      })),
+    })
+  }, [currentPorts])
 
   useEffect(() => {
     const map = mapRef.current
@@ -166,7 +194,7 @@ export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 20
         {(['low', 'medium', 'high'] as const).map(level => (
           <span key={level} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: congColor[level] }} />
-            {level === 'medium' ? 'Med' : level[0].toUpperCase() + level.slice(1)}
+            {level === 'low' ? 'Normal' : level === 'medium' ? 'Medium Anomaly' : 'High Anomaly'}
           </span>
         ))}
       </div>
@@ -175,10 +203,12 @@ export const MiniMap: React.FC<MiniMapProps> = ({ width: W = 440, height: H = 20
           position: 'absolute', right: 8, top: 8, background: 'var(--bg-elevated)',
           border: '1px solid var(--border-default)', borderRadius: 6,
           padding: '6px 8px', boxShadow: 'var(--shadow-sm)',
+          zIndex: 10,
         }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{PORT_DATA[hoverPort]?.name}</div>
-          <div style={{ fontSize: 10, color: congColor[PORT_DATA[hoverPort]?.congestion ?? 'low'], marginTop: 1 }}>
-            {(PORT_DATA[hoverPort]?.congestion ?? 'low').toUpperCase()} congestion
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{currentPorts[hoverPort]?.name}</div>
+          <div style={{ fontSize: 10, color: congColor[currentPorts[hoverPort]?.congestion ?? 'low'], marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+            {currentPorts[hoverPort]?.hasAnomaly && <Icons.AlertTriangle size={10} style={{ color: congColor[currentPorts[hoverPort]?.congestion ?? 'low'] }} />}
+            {currentPorts[hoverPort]?.hasAnomaly ? `${currentPorts[hoverPort]?.congestion.toUpperCase()} anomaly` : 'Normal'}
           </div>
         </div>
       )}

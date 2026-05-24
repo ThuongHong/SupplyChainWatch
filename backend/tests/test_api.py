@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from app.api.routes.insights import latest_insights
 from app.api.routes.health import health
+from app.api.routes.insights import latest_insights
 from app.main import app
 
 
@@ -37,18 +37,22 @@ class FakeInsightsDb:
 
 
 def test_health_endpoint() -> None:
+    # (keeps original)
     response = asyncio.run(health())
 
     assert response["status"] == "ok"
 
 
 def test_openapi_exposes_week2_routes() -> None:
+    # (keeps original)
     schema = app.openapi()
     paths = schema["paths"]
 
     assert "/api/indices" in paths
     assert "/api/vessels/snapshot" in paths
     assert "/api/ports/congestion" in paths
+    assert "/api/ports/activity" in paths
+    assert "/api/ports/comparison" in paths
     assert "/api/chokepoints" in paths
     assert "/api/insights/latest" in paths
     assert "/api/correlations" in paths
@@ -68,6 +72,7 @@ def test_openapi_exposes_week2_routes() -> None:
 
 
 def test_latest_insights_returns_risk_story_fields() -> None:
+    # (keeps original)
     rows = [
         {
             "id": 1,
@@ -101,3 +106,72 @@ def test_latest_insights_returns_risk_story_fields() -> None:
     assert payload[0]["affected_entities"] == [
         {"type": "port", "id": "port-sgsin", "name": "Singapore"}
     ]
+
+
+def test_anomalies_endpoint_with_port_id() -> None:
+    from app.api.routes.insights import list_anomalies
+
+    now = datetime.now(UTC)
+    rows = []
+    # 7 baseline points plus 1 current point to satisfy the min 7 points history requirement
+    for offset in range(8):
+        rows.append(
+            {
+                "time": now - timedelta(days=7 - offset),
+                "port_id": 2,
+                "port_name": "Rotterdam",
+                "anchored_count": 10,
+                "moored_count": 5,
+                "underway_count": 5,
+                "total_in_area": 20,
+                "avg_dwell_hours": 15.0,
+                "median_speed": 4.5,
+            }
+        )
+    db = FakeInsightsDb(rows)
+    payload = asyncio.run(list_anomalies(db, days=30, port_id=2))  # type: ignore[arg-type]
+
+    assert len(payload) == 1
+    assert payload[0]["port_name"] == "Rotterdam"
+    assert payload[0]["port_id"] == 2
+    assert payload[0]["severity"] == "low"
+
+
+def test_port_activity_endpoint() -> None:
+    from app.api.routes.ports import port_activity
+
+    now = datetime.now(UTC)
+    rows = [
+        {
+            "port_id": 1,
+            "port_name": "Singapore",
+            "time": now,
+            "metric_name": "vessel_count",
+            "value": 120.0
+        }
+    ]
+    db = FakeInsightsDb(rows)
+    payload = asyncio.run(port_activity(db, port_id=1, days=30))  # type: ignore[arg-type]
+
+    assert len(payload) == 1
+    assert payload[0]["port_name"] == "Singapore"
+    assert payload[0]["value"] == 120.0
+
+
+def test_port_comparison_endpoint() -> None:
+    from app.api.routes.ports import port_comparison
+
+    rows = [
+        {
+            "port_id": 1,
+            "port_name": "Singapore",
+            "metric_name": "vessel_count",
+            "value": 120.0
+        }
+    ]
+    db = FakeInsightsDb(rows)
+    payload = asyncio.run(port_comparison(db, days=30, metric="vessel_count"))  # type: ignore[arg-type]
+
+    assert len(payload) == 1
+    assert payload[0]["port_name"] == "Singapore"
+    assert payload[0]["value"] == 120.0

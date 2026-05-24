@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+
 from app.tasks.jobs import collect_all
 
 router = APIRouter(prefix="/sync", tags=["sync"])

@@ -24,6 +24,8 @@ import {
   type OverviewStats,
   type RiskScoreResponse,
   type RiskStoryEventResponse,
+  type PortResponse,
+  type PortCongestionResponse,
 } from '../api/client'
 import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
@@ -35,6 +37,8 @@ import {
   relativeTime,
   rowDataMode,
   shouldUseDemoRows,
+  buildPortViewModels,
+  type PortViewModel,
 } from '../api/viewModels'
 import type { PageId } from '../components/layout/Sidebar'
 
@@ -59,7 +63,6 @@ const riskFromStats = (stats: OverviewStats | null, highAnomalies: number) => {
 
 const riskTone = (severity?: string) => severity === 'high' ? 'danger' : severity === 'medium' ? 'warning' : 'success'
 const riskScore = (row?: RiskScoreResponse) => row ? Math.round(row.score) : 0
-const shortReason = (row?: RiskScoreResponse) => row?.reasons?.[0] ?? row?.freshness_status ?? 'No live PortWatch score'
 const forecastDirection = (forecast?: EntityRiskForecastResponse) => {
   const scores = (forecast?.predictions ?? [])
     .map(point => Number(point.risk_score ?? NaN))
@@ -68,16 +71,20 @@ const forecastDirection = (forecast?: EntityRiskForecastResponse) => {
   const delta = scores[scores.length - 1] - scores[0]
   return { delta, label: delta >= 0 ? 'rising' : 'easing' }
 }
-const demoPortRiskRows = (): RiskScoreResponse[] => MOCK.portRisk.map((item, index) => ({
-  entity_id: `demo-${item.name}`,
-  entity_name: item.name,
-  entity_type: 'port',
-  score: 78 - index * 7,
-  severity: index < 2 ? 'high' : 'medium',
-  component_scores: {},
-  freshness_status: 'demo',
-  as_of: new Date().toISOString(),
-}))
+
+const getRiskEntityId = (port: PortViewModel): string | null => {
+  return port.locode ? `port-${port.locode.toLowerCase()}` : null
+}
+
+const demoDashboardPorts = (): PortViewModel[] => {
+  return [
+    { id: 1, locode: 'CNSHA', name: 'Shanghai', country: 'China', region: 'Asia', lat: 31.2, lon: 121.5, radius_km: 25, twenty_ft_eq_units_year: 47300000, severity: 'high', stale: false, congestion: { time: new Date().toISOString(), port_id: 1, port_name: 'Shanghai', anchored_count: 52, total_in_area: 118, moored_count: 0, underway_count: 0 } },
+    { id: 2, locode: 'SGSIN', name: 'Singapore', country: 'Singapore', region: 'Asia', lat: 1.3, lon: 103.8, radius_km: 25, twenty_ft_eq_units_year: 37200000, severity: 'medium', stale: false, congestion: { time: new Date().toISOString(), port_id: 2, port_name: 'Singapore', anchored_count: 24, total_in_area: 68, moored_count: 0, underway_count: 0 } },
+    { id: 3, locode: 'NLRTM', name: 'Rotterdam', country: 'Netherlands', region: 'Europe', lat: 51.9, lon: 4.1, radius_km: 25, twenty_ft_eq_units_year: 14400000, severity: 'low', stale: false, congestion: { time: new Date().toISOString(), port_id: 3, port_name: 'Rotterdam', anchored_count: 11, total_in_area: 32, moored_count: 0, underway_count: 0 } },
+    { id: 4, locode: 'USLAX', name: 'Los Angeles', country: 'USA', region: 'Americas', lat: 33.7, lon: -118.2, radius_km: 25, twenty_ft_eq_units_year: 10600000, severity: 'low', stale: false, congestion: { time: new Date().toISOString(), port_id: 4, port_name: 'Los Angeles', anchored_count: 8, total_in_area: 25, moored_count: 0, underway_count: 0 } },
+    { id: 5, locode: 'DEHAM', name: 'Hamburg', country: 'Germany', region: 'Europe', lat: 53.5, lon: 9.9, radius_km: 25, twenty_ft_eq_units_year: 8500000, severity: 'low', stale: false, congestion: { time: new Date().toISOString(), port_id: 5, port_name: 'Hamburg', anchored_count: 5, total_in_area: 18, moored_count: 0, underway_count: 0 } }
+  ]
+}
 
 export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNavigate }) => {
   const [showTour, setShowTour] = useState(() => localStorage.getItem('gsw-onboarding-seen') !== '1')
@@ -95,10 +102,9 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
     queryKey: queryKeys.portCongestion,
     queryFn: ({ signal }) => apiClient.portCongestion({ signal }),
   })
-  const portRiskQuery = useQuery({
-    queryKey: queryKeys.globalPortRisk(25),
-    queryFn: ({ signal }) => apiClient.globalPortRisk(25, { signal }),
-    refetchInterval: 60_000,
+  const portsQuery = useQuery({
+    queryKey: queryKeys.ports(),
+    queryFn: ({ signal }) => apiClient.ports(undefined, { signal }),
   })
   const chokepointRiskQuery = useQuery({
     queryKey: queryKeys.chokepointStress(25),
@@ -131,34 +137,59 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
 
   const bdi = indexQueries[0].data ?? []
   const fbx = indexQueries[1].data ?? []
-  const portRiskRows = portRiskQuery.data ?? []
   const chokepointRows = chokepointRiskQuery.data ?? []
   const propagationRows = propagationQuery.data ?? []
   const freshnessRows = freshnessQuery.data ?? []
   const watchlistRows = watchlistQuery.data ?? []
-  const topPort = portRiskRows[0]
+
+  const livePorts = useMemo(() => buildPortViewModels(portsQuery.data ?? [], congestionQuery.data ?? []), [portsQuery.data, congestionQuery.data])
+  const useDemoPorts = shouldUseDemoRows({
+    loading: portsQuery.isLoading || congestionQuery.isLoading,
+    error: portsQuery.error ?? congestionQuery.error,
+    rowCount: livePorts.length,
+    demoEnabled: ENABLE_DEMO_FALLBACK,
+  })
+  const displayedPorts = livePorts.length ? livePorts : useDemoPorts ? demoDashboardPorts() : []
+
+  const topPort = displayedPorts[0]
   const topChokepoint = chokepointRows[0]
+  const selectedRiskEntityId = topPort ? getRiskEntityId(topPort) : null
+
   const riskStoriesQuery = useQuery({
-    queryKey: queryKeys.riskStories(topPort?.entity_id, 180, 5),
-    queryFn: ({ signal }) => apiClient.riskStories({ entity_id: topPort?.entity_id, days: 180, limit: 5 }, { signal }),
-    enabled: Boolean(topPort),
+    queryKey: queryKeys.riskStories(selectedRiskEntityId ?? undefined, 180, 5),
+    queryFn: ({ signal }) => apiClient.riskStories({ entity_id: selectedRiskEntityId!, days: 180, limit: 5 }, { signal }),
+    enabled: Boolean(selectedRiskEntityId),
   })
   const riskForecastQuery = useQuery({
-    queryKey: topPort ? queryKeys.riskEntityForecast(topPort.entity_id) : ['risk', 'forecast', 'no-entity'],
-    queryFn: ({ signal }) => apiClient.riskEntityForecast(topPort!.entity_id, { signal }),
-    enabled: Boolean(topPort),
+    queryKey: selectedRiskEntityId ? queryKeys.riskEntityForecast(selectedRiskEntityId) : ['risk', 'forecast', 'no-entity'],
+    queryFn: ({ signal }) => apiClient.riskEntityForecast(selectedRiskEntityId!, { signal }),
+    enabled: Boolean(selectedRiskEntityId),
   })
   const liveStats = statsQuery.data ?? null
-  const apiError = portRiskQuery.error ?? chokepointRiskQuery.error ?? statsQuery.error ?? insightsQuery.error ?? congestionQuery.error ?? anomaliesQuery.error ?? riskStoriesQuery.error ?? riskForecastQuery.error ?? indexQueries.find(q => q.error)?.error
+  const apiError = portsQuery.error ?? congestionQuery.error ?? chokepointRiskQuery.error ?? statsQuery.error ?? insightsQuery.error ?? anomaliesQuery.error ?? riskStoriesQuery.error ?? riskForecastQuery.error ?? indexQueries.find(q => q.error)?.error
   const stale = isStale(liveStats?.generated_at, 6)
   const highAnomalies = activeHighAnomalies(anomaliesQuery.data ?? [])
   const risk = riskFromStats(liveStats, highAnomalies)
   const riskStoryRows = riskStoriesQuery.data ?? []
   const riskForecast = riskForecastQuery.data as EntityRiskForecastResponse | undefined
   const riskForecastDirection = forecastDirection(riskForecast)
-  const derivedRiskLive = portRiskRows.length > 0 || chokepointRows.length > 0
+  const derivedRiskLive = displayedPorts.length > 0 || chokepointRows.length > 0
   const summaryUnavailable = !liveStats && !derivedRiskLive
   const staleSources = freshnessRows.filter(row => row.freshness_status === 'stale').length
+
+  const topPortAnomaly = useMemo(() => {
+    if (!topPort) return undefined
+    return (anomaliesQuery.data ?? []).find((a: any) => a.port_id === topPort.id && (a.severity === 'high' || a.severity === 'medium'))
+  }, [topPort, anomaliesQuery.data])
+
+  const topPortDetail = useMemo(() => {
+    if (topPortAnomaly) {
+      return `${topPortAnomaly.severity.toUpperCase()} anomaly: ${topPortAnomaly.main_driver?.replace(/_/g, ' ')}`
+    }
+    return topPort?.congestion 
+      ? `${topPort.congestion.total_in_area} vessels in area (${topPort.congestion.anchored_count} anchored)`
+      : 'No active anomalies'
+  }, [topPort, topPortAnomaly])
 
   const liveInsights = useMemo<FeedInsight[]>(() => (insightsQuery.data ?? []).map((insight: InsightResponse) => ({
     text: insight.narrative_llm || insight.narrative,
@@ -176,13 +207,6 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
 
   const bdiChange = percentChange(bdi)
   const fbxChange = percentChange(fbx)
-  const useDemoPortRisk = shouldUseDemoRows({
-    loading: portRiskQuery.isLoading,
-    error: portRiskQuery.error,
-    rowCount: portRiskRows.length,
-    demoEnabled: ENABLE_DEMO_FALLBACK,
-  })
-  const displayedPortRiskRows = portRiskRows.length ? portRiskRows : useDemoPortRisk ? demoPortRiskRows() : []
 
   const highPorts = (congestionQuery.data ?? []).filter(row => row.total_in_area >= 100 || row.anchored_count >= 45).length
 
@@ -219,20 +243,20 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         {apiError && <ErrorPanel error={apiError} title="Some dashboard APIs are unavailable" compact />}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(3, minmax(150px, 1fr))', gap: 12 }}>
-          <Card style={{ padding: 16, border: `1px solid ${topPort?.severity === 'high' ? 'var(--danger)' : topPort?.severity === 'medium' ? 'var(--warning)' : 'var(--border-default)'}` }}>
+          <Card style={{ padding: 16, border: `1px solid ${topPort ? topPort.severity === 'high' ? 'var(--danger)' : topPort.severity === 'medium' ? 'var(--warning)' : 'var(--border-default)' : 'var(--border-default)'}` }}>
             <SectionHeader
-              title="PortWatch Intelligence"
-              sub={topPort ? `${topPort.entity_name}: ${shortReason(topPort)}` : summaryUnavailable ? 'No live overview or PortWatch risk rows' : risk.detail}
-              action={<Badge variant={topPort ? riskTone(topPort.severity) : summaryUnavailable ? 'default' : (risk.severity === 'high' ? 'danger' : risk.severity === 'medium' ? 'warning' : 'success')}>{topPort ? `${Math.round(topPort.score)}/100` : summaryUnavailable ? 'Unavailable' : risk.label}</Badge>}
+              title="Port Congestion Intelligence"
+              sub={topPort ? `${topPort.name}: ${topPortDetail}` : summaryUnavailable ? 'No live PortWatch congestion data' : risk.detail}
+              action={<Badge variant={topPort ? (topPort.severity === 'high' ? 'danger' : topPort.severity === 'medium' ? 'warning' : 'success') : summaryUnavailable ? 'default' : (risk.severity === 'high' ? 'danger' : risk.severity === 'medium' ? 'warning' : 'success')}>{topPort ? topPort.severity.toUpperCase() : summaryUnavailable ? 'Unavailable' : risk.label}</Badge>}
             />
             <DataProvenance
-              mode={rowDataMode({ loading: portRiskQuery.isLoading || chokepointRiskQuery.isLoading, error: portRiskQuery.error ?? chokepointRiskQuery.error, rowCount: Number(derivedRiskLive), demoEnabled: ENABLE_DEMO_FALLBACK })}
-              source={derivedRiskLive ? 'PortWatch derived risk' : ENABLE_DEMO_FALLBACK ? 'Demo risk fallback enabled' : 'PortWatch derived risk unavailable'}
-              timestamp={topPort ? `As of ${relativeTime(topPort.as_of)}` : liveStats ? `Updated ${relativeTime(liveStats.generated_at)}` : undefined}
-              stale={topPort?.freshness_status === 'stale' || stale}
+              mode={rowDataMode({ loading: portsQuery.isLoading || congestionQuery.isLoading || chokepointRiskQuery.isLoading, error: portsQuery.error ?? congestionQuery.error ?? chokepointRiskQuery.error, rowCount: displayedPorts.length, demoEnabled: ENABLE_DEMO_FALLBACK })}
+              source={displayedPorts.length > 0 ? 'PortWatch congestion' : ENABLE_DEMO_FALLBACK ? 'Demo congestion fallback enabled' : 'PortWatch congestion unavailable'}
+              timestamp={topPort?.congestion?.time ? `As of ${relativeTime(topPort.congestion.time)}` : liveStats ? `Updated ${relativeTime(liveStats.generated_at)}` : undefined}
+              stale={topPort?.stale || stale}
             />
           </Card>
-          <MetricCard label="Top Port Risk" value={topPort ? `${riskScore(topPort)}` : '0'} sub={topPort?.entity_name ?? 'No score rows'} tone={topPort ? riskTone(topPort.severity) : 'info'} icon={<Icons.AlertTriangle size={15} />} footer={<Sparkline data={portRiskRows.slice(0, 8).map(row => row.score)} color="var(--danger)" width={90} height={28} />} />
+          <MetricCard label="Top Port Congestion" value={topPort?.congestion ? `${topPort.congestion.total_in_area}` : '0'} sub={topPort?.name ?? 'No active ports'} tone={topPort ? (topPort.severity === 'high' ? 'danger' : topPort.severity === 'medium' ? 'warning' : 'success') : 'info'} icon={<Icons.AlertTriangle size={15} />} footer={<Sparkline data={displayedPorts.slice(0, 8).map(port => port.congestion?.total_in_area ?? 0)} color="var(--danger)" width={90} height={28} />} />
           <MetricCard label="Chokepoint Stress" value={topChokepoint ? `${riskScore(topChokepoint)}` : '0'} sub={topChokepoint?.entity_name ?? 'No score rows'} tone={topChokepoint ? riskTone(topChokepoint.severity) : 'info'} icon={<Icons.Activity size={15} />} footer={<Sparkline data={chokepointRows.slice(0, 8).map(row => row.score)} color="var(--warning)" width={90} height={28} />} />
           <MetricCard label="Propagation Links" value={fmtNum(propagationRows.length)} sub={propagationRows.length ? 'downstream impact' : 'No active links'} tone={propagationRows.length > 0 ? 'warning' : 'success'} icon={<Icons.TrendingUp size={15} />} />
         </div>
@@ -240,14 +264,14 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         <Card style={{ padding: 16 }}>
           <SectionHeader
             title="Executive Brief"
-            sub="One-screen operational story from live risk, story, forecast, and source rows."
-            action={<DataProvenance mode={derivedRiskLive ? 'live' : portRiskQuery.isLoading ? 'loading' : 'empty'} source="Dashboard live synthesis" />}
+            sub="One-screen operational story from live congestion, story, forecast, and source rows."
+            action={<DataProvenance mode={derivedRiskLive ? 'live' : portsQuery.isLoading || congestionQuery.isLoading ? 'loading' : 'empty'} source="Dashboard live synthesis" />}
           />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
             <div style={{ padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
-              <Badge variant={topPort ? riskTone(topPort.severity) : 'default'}>Current pressure</Badge>
+              <Badge variant={topPort ? (topPort.severity === 'high' ? 'danger' : topPort.severity === 'medium' ? 'warning' : 'success') : 'default'}>Current pressure</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
-                {topPort ? `${topPort.entity_name} leads port risk at ${Math.round(topPort.score)}/100; ${shortReason(topPort)}.` : 'No live ranked port risk row is available yet.'}
+                {topPort ? `${topPort.name} leads port congestion with ${topPort.congestion?.total_in_area ?? 0} vessels in area and ${topPort.congestion?.anchored_count ?? 0} anchored.` : 'No live ranked port congestion row is available yet.'}
               </div>
             </div>
             <div style={{ padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
@@ -260,7 +284,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
               <Badge variant={riskForecastDirection ? riskForecastDirection.delta >= 0 ? 'warning' : 'success' : staleSources ? 'danger' : 'default'}>Forward read</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {riskForecastDirection
-                  ? `${topPort?.entity_name ?? 'Selected entity'} forecast is ${riskForecastDirection.label} by ${Math.abs(riskForecastDirection.delta).toFixed(1)} points at ${Math.round((riskForecast?.confidence ?? 0) * 100)}% confidence.`
+                  ? `${topPort?.name ?? 'Selected entity'} forecast is ${riskForecastDirection.label} by ${Math.abs(riskForecastDirection.delta).toFixed(1)} points at ${Math.round((riskForecast?.confidence ?? 0) * 100)}% confidence.`
                   : staleSources
                     ? `${staleSources} source${staleSources === 1 ? '' : 's'} stale; treat downstream stories as lower-confidence.`
                     : 'Forecast path unavailable until enough real feature history exists.'}
@@ -272,20 +296,24 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(300px, 2fr)', gap: 12 }}>
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader
-              title="Global Port Risk Ranking"
-              sub={portRiskRows.length ? `${portRiskRows.length} monitored ports scored` : useDemoPortRisk ? 'Demo fallback risk scores' : 'Awaiting PortWatch risk scores'}
-              action={<DataProvenance mode={rowDataMode({ loading: portRiskQuery.isLoading, error: portRiskQuery.error, rowCount: portRiskRows.length, demoEnabled: ENABLE_DEMO_FALLBACK })} source="PortWatch · derived score" />}
+              title="Global Port Congestion Ranking"
+              sub={displayedPorts.length ? `${displayedPorts.length} monitored ports ranked` : useDemoPorts ? 'Demo fallback congestion' : 'Awaiting PortWatch congestion'}
+              action={<DataProvenance mode={rowDataMode({ loading: portsQuery.isLoading || congestionQuery.isLoading, error: portsQuery.error ?? congestionQuery.error, rowCount: displayedPorts.length, demoEnabled: ENABLE_DEMO_FALLBACK })} source="PortWatch · congestion" />}
             />
-            {portRiskQuery.isLoading ? <SkeletonBlock height={200} /> : (
+            {portsQuery.isLoading || congestionQuery.isLoading ? <SkeletonBlock height={200} /> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {displayedPortRiskRows.slice(0, 7).map(row => (
-                  <div key={row.entity_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 80px minmax(160px, 2fr)', gap: 10, alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600 }}>{row.entity_name}</span>
-                    <Badge variant={riskTone(row.severity)}>{Math.round(row.score)}/100</Badge>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{shortReason(row)}</span>
+                {displayedPorts.slice(0, 7).map(port => (
+                  <div key={port.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 80px minmax(160px, 2fr)', gap: 10, alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600 }}>{port.name}</span>
+                    <Badge variant={port.severity === 'high' ? 'danger' : port.severity === 'medium' ? 'warning' : 'success'}>
+                      {port.severity.toUpperCase()}
+                    </Badge>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                      {port.congestion ? `${port.congestion.total_in_area} vessels in area (${port.congestion.anchored_count} anchored)` : 'No live AIS telemetry'}
+                    </span>
                   </div>
                 ))}
-                {displayedPortRiskRows.length === 0 && <EmptyState title="No PortWatch risk score rows" detail="Run PortWatch collection and maritime risk scoring to populate this ranking." compact />}
+                {displayedPorts.length === 0 && <EmptyState title="No PortWatch congestion telemetry" detail="Run PortWatch collection to populate this ranking." compact />}
               </div>
             )}
           </Card>
@@ -293,10 +321,10 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader
               title="Congestion Heatmap"
-              sub={portRiskRows.length ? `${topPort?.entity_name ?? 'Port'} leads risk ranking` : 'No live risk overlay'}
-              action={<DataProvenance mode={portRiskRows.length ? 'live' : congestionQuery.isLoading ? 'loading' : 'empty'} source="Risk heatmap" />}
+              sub={displayedPorts.length ? `${topPort?.name ?? 'Port'} leads congestion ranking` : 'No live congestion overlay'}
+              action={<DataProvenance mode={displayedPorts.length ? 'live' : congestionQuery.isLoading ? 'loading' : 'empty'} source="Congestion heatmap" />}
             />
-            <MiniMap height={176} congestion={congestionQuery.data ?? []} />
+            <MiniMap height={176} congestion={congestionQuery.data ?? []} anomalies={anomaliesQuery.data ?? []} />
           </Card>
         </div>
 
@@ -314,7 +342,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
             ))}
             {!propagationQuery.isLoading && propagationRows.length === 0 && <EmptyState title="No active propagation links" detail="Risk scores below configured propagation threshold." compact />}
           </Card>
-          
+
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader title="Operational Pulse" sub="High-level systemic pressure indicators" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -331,7 +359,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
               ))}
             </div>
             <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-               <button onClick={() => onNavigate?.('insights')} style={{ border: 0, background: 'transparent', cursor: 'pointer' }}><Badge variant="accent">Open AI Risk Workbench →</Badge></button>
+              <button onClick={() => onNavigate?.('insights')} style={{ border: 0, background: 'transparent', cursor: 'pointer' }}><Badge variant="accent">Open AI Risk Workbench →</Badge></button>
             </div>
           </Card>
         </div>

@@ -19,8 +19,8 @@ from app.api.routes.ports import router as ports_router
 from app.api.routes.risk import router as risk_router
 from app.api.routes.stats import router as stats_router
 from app.api.routes.story import router as story_router
-from app.api.routes.vessels import router as vessels_router
 from app.api.routes.sync import router as sync_router
+from app.api.routes.vessels import router as vessels_router
 from app.config import get_settings
 
 app = FastAPI(

@@ -275,9 +275,7 @@ def test_manual_backfill_accepts_bdi_rows() -> None:
 
 
 def test_public_seed_parsers_extract_major_freight_indices() -> None:
-    bdi_rows = _parse_stockq_bdi(
-        "2026/05/22 Baltic Dry 2991.00 2026/05/21 Baltic Dry 2964.00"
-    )
+    bdi_rows = _parse_stockq_bdi("2026/05/22 Baltic Dry 2991.00 2026/05/21 Baltic Dry 2964.00")
     assert bdi_rows == [
         (datetime(2026, 5, 21).date(), 2964.0),
         (datetime(2026, 5, 22).date(), 2991.0),
@@ -329,15 +327,13 @@ def test_public_seed_parsers_extract_major_freight_indices() -> None:
         (datetime(2026, 5, 22).date(), 2191.0),
     ]
 
-    wci_rows = _parse_mts_wci(
-        """
+    wci_rows = _parse_mts_wci("""
         2026-05-21 · 09:45 Drewry World Container Index: Week of May 21st
         The Drewry World Container Index (WCI) increased 6% to $2,712 per 40ft container.
         2026-05-14 · 09:45 Drewry World Container Index: Week of May 14th
         The Drewry World Container Index (WCI) surged 12% to $2,553 per 40ft container.
         © 2026 MTS Insights.
-        """
-    )
+        """)
     assert wci_rows == [
         (datetime(2026, 5, 14).date(), 2553.0),
         (datetime(2026, 5, 21).date(), 2712.0),

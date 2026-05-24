@@ -84,6 +84,21 @@ class PortCongestionResponse(BaseModel):
     portwatch_portcalls: int | None = None
 
 
+class PortActivityItem(BaseModel):
+    port_id: int
+    port_name: str
+    time: datetime
+    metric_name: str
+    value: float
+
+
+class PortComparisonItem(BaseModel):
+    port_id: int
+    port_name: str
+    metric_name: str
+    value: float
+
+
 class ChokepointResponse(BaseModel):
     id: int
     name: str
@@ -114,6 +129,17 @@ class AnomalyResponse(BaseModel):
     description: str | None = None
     explanation: str | None = None
     acknowledged: bool = False
+
+    # New fields for port anomalies
+    port_id: int | None = None
+    port_name: str | None = None
+    time: datetime | None = None
+    anomaly_score: float | None = None
+    main_driver: str | None = None
+    current_value: float | None = None
+    baseline_mean: float | None = None
+    baseline_std: float | None = None
+    message: str | None = None
 
 
 class InsightResponse(BaseModel):

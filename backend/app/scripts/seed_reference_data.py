@@ -16,6 +16,10 @@ PORTS = [
     ("NLRTM", "Rotterdam", "Netherlands", "Europe", 51.9244, 4.4777, 25, 14450000),
     ("AEJEA", "Jebel Ali", "United Arab Emirates", "Middle East", 25.0118, 55.0613, 25, 14000000),
     ("DEHAM", "Hamburg", "Germany", "Europe", 53.5511, 9.9937, 20, 8300000),
+    ("EGPSD", "Port Said", "Egypt", "Mediterranean", 31.25, 32.30, 20, 4000000),
+    ("ESALG", "Algeciras", "Spain", "Mediterranean", 36.13, -5.45, 20, 4800000),
+    ("USNYC", "New York-New Jersey", "United States", "North America", 40.67, -74.05, 25, 8000000),
+    ("USSAV", "Savannah", "United States", "North America", 32.12, -81.12, 25, 5500000),
 ]
 
 CHOKEPOINTS = [
@@ -84,6 +88,7 @@ def main() -> None:
                         WHERE entity_id = :entity_id
                           AND metric_name = :metric_name
                           AND source = :source
+                          AND observed_at = :observed_at
                     )
                     """),
                 {

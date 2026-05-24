@@ -11,10 +11,8 @@ describe('real data default page behavior', () => {
   it('keeps Dashboard demo port risk and insights behind explicit demo mode', () => {
     const source = readPage('Dashboard.tsx')
     expect(source).toMatch(/ENABLE_DEMO_FALLBACK/)
-    expect(source).toMatch(/displayedPortRiskRows = portRiskRows\.length \? portRiskRows : useDemoPortRisk \? demoPortRiskRows\(\) : \[\]/)
-    expect(source).toMatch(/insights: FeedInsight\[\] = liveInsights\.length > 0 \? liveInsights : useDemoInsights \? MOCK\.insights/)
-    expect(source).toMatch(/No PortWatch risk score rows/)
-    expect(source).toMatch(/No live insights/)
+    expect(source).toMatch(/displayedPorts = livePorts\.length \? livePorts : useDemoPorts \? demoDashboardPorts\(\) : \[\]/)
+    expect(source).toMatch(/No PortWatch congestion telemetry/)
   })
 
   it('keeps Ports demo rows behind explicit demo mode', () => {

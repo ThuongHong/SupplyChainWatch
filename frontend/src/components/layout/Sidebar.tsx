@@ -6,7 +6,7 @@ import { relativeTime } from '../../api/viewModels'
 import { Icons } from '../icons'
 import { StatusDot } from '../StatusDot'
 
-type PageId = 'dashboard' | 'indices' | 'vessels' | 'ports' | 'insights'
+type PageId = 'dashboard' | 'indices' | 'vessels' | 'ports' | 'insights' | 'analytics'
 
 const NAV_GROUPS: { title: string; items: { id: PageId; label: string; iconKey: keyof typeof Icons }[] }[] = [
   {
@@ -27,6 +27,7 @@ const NAV_GROUPS: { title: string; items: { id: PageId; label: string; iconKey: 
     title: 'INTELLIGENCE',
     items: [
       { id: 'insights', label: 'AI Risk Workbench', iconKey: 'Lightbulb' },
+      { id: 'analytics', label: 'EDA Analytics', iconKey: 'Activity' },
     ]
   }
 ]

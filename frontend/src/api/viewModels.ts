@@ -103,11 +103,14 @@ export interface PortViewModel extends PortResponse {
 export function buildPortViewModels(
   ports: PortResponse[],
   congestion: PortCongestionResponse[],
+  anomalies?: any[],
 ): PortViewModel[] {
   const byPort = new Map(congestion.map(row => [row.port_id, row]))
+  const byAnomaly = new Map((anomalies ?? []).map(a => [a.port_id, a]))
   return ports.map(port => {
     const row = byPort.get(port.id)
-    const severity = congestionSeverity(row)
+    const anomaly = byAnomaly.get(port.id)
+    const severity = anomaly ? anomaly.severity : 'low'
     return {
       ...port,
       congestion: row,

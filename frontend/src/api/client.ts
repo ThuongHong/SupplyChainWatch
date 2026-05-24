@@ -146,6 +146,21 @@ export interface PortCongestionResponse {
   portwatch_portcalls?: number | null;
 }
 
+export interface PortActivityItem {
+  port_id: number;
+  port_name: string;
+  time: string;
+  metric_name: string;
+  value: number;
+}
+
+export interface PortComparisonItem {
+  port_id: number;
+  port_name: string;
+  metric_name: string;
+  value: number;
+}
+
 export interface ChokepointResponse {
   id: number;
   name: string;
@@ -176,7 +191,18 @@ export interface AnomalyResponse {
   description?: string | null;
   explanation?: string | null;
   acknowledged: boolean;
+
+  port_id?: number | null;
+  port_name?: string | null;
+  time?: string | null;
+  anomaly_score?: number | null;
+  main_driver?: string | null;
+  current_value?: number | null;
+  baseline_mean?: number | null;
+  baseline_std?: number | null;
+  message?: string | null;
 }
+
 
 export interface InsightResponse {
   id: number;
@@ -392,7 +418,10 @@ export interface VesselSnapshotParams {
 export interface AnomalyParams {
   days?: number;
   severity?: string;
+  port_id?: number;
+  limit?: number;
 }
+
 
 export const apiClient = {
   health: (init?: RequestInit) => request<HealthResponse>("/api/health", init),
@@ -411,6 +440,10 @@ export const apiClient = {
   portCongestion: (init?: RequestInit) => request<PortCongestionResponse[]>("/api/ports/congestion", init),
   portTimeline: (portId: number, days = 30, init?: RequestInit) =>
     request<PortCongestionResponse[]>(`/api/ports/${portId}/timeline${queryString({ days })}`, init),
+  portActivity: (params: { port_id?: number; days?: number; limit?: number } = {}, init?: RequestInit) =>
+    request<PortActivityItem[]>(`/api/ports/activity${queryString(params)}`, init),
+  portComparison: (params: { days?: number; metric?: string } = {}, init?: RequestInit) =>
+    request<PortComparisonItem[]>(`/api/ports/comparison${queryString(params)}`, init),
   chokepoints: (init?: RequestInit) => request<ChokepointResponse[]>("/api/chokepoints", init),
   chokepointTimeline: (chokepointId: number, days = 30, init?: RequestInit) =>
     request<ChokepointTimelinePoint[]>(

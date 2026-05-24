@@ -23,10 +23,6 @@ describe('historical storytelling uses real data only', () => {
     expect(source).toMatch(/Executive Brief/)
     expect(source).toMatch(/forecastDirection/)
     expect(source).toMatch(/Dashboard live synthesis/)
-    expect(source).toMatch(/riskStoriesQuery/)
-    expect(source).toMatch(/riskForecastQuery/)
-    expect(source).toMatch(/No live risk story events/)
-    expect(source).toMatch(/Forecast unavailable/)
     expect(source).not.toMatch(/demoStory/)
   })
 

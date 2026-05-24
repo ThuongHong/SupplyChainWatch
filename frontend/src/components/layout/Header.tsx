@@ -12,6 +12,7 @@ const PAGE_META: Record<PageId, { parent: string; title: string }> = {
   vessels: { parent: 'Micro Causes', title: 'Live Vessel Map' },
   ports: { parent: 'Micro Causes', title: 'Port Congestion' },
   insights: { parent: 'Intelligence', title: 'AI Risk Workbench' },
+  analytics: { parent: 'Intelligence', title: 'EDA Analytics' },
 }
 
 interface HeaderProps {

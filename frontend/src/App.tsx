@@ -5,10 +5,11 @@ import { Dashboard } from './pages/Dashboard'
 import { MacroIndices } from './pages/MacroIndices'
 import { Ports } from './pages/Ports'
 import { InsightsHub } from './pages/InsightsHub'
+import { Analytics } from './pages/Analytics'
 
 const VesselMap = lazy(() => import('./pages/VesselMap').then(module => ({ default: module.VesselMap })))
 
-const PAGE_IDS: PageId[] = ['dashboard', 'indices', 'vessels', 'ports', 'insights']
+const PAGE_IDS: PageId[] = ['dashboard', 'indices', 'vessels', 'ports', 'insights', 'analytics']
 
 function pageFromHash(): PageId {
   const hash = window.location.hash.replace('#/', '').replace('#', '')
@@ -46,7 +47,9 @@ export default function App() {
         ? VesselMap
         : page === 'ports'
           ? Ports
-          : InsightsHub
+          : page === 'analytics'
+            ? Analytics
+            : InsightsHub
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>

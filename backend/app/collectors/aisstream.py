@@ -28,6 +28,10 @@ MONITORED_BOUNDING_BOXES = [
     [[34.9, 128.8], [35.4, 129.3]],  # Busan
     [[53.3, 9.6], [54.0, 10.3]],  # Hamburg
     [[24.8, 54.8], [27.2, 57.5]],  # Strait of Hormuz & Jebel Ali
+    [[31.1, 32.1], [31.5, 32.6]],  # Port Said (Mediterranean)
+    [[36.0, -5.5], [36.2, -5.3]],  # Algeciras (Mediterranean)
+    [[40.4, -74.3], [40.9, -73.7]],  # New York-New Jersey (US East Coast)
+    [[31.9, -81.2], [32.2, -80.8]],  # Savannah (US East Coast)
 ]
 
 
