@@ -118,6 +118,32 @@ export function latestPortAnomalyById<T extends Pick<AnomalyResponse, 'port_id' 
   return byPort
 }
 
+const OPERATIONAL_PORT_ANOMALY_METRICS = new Set([
+  'portcalls',
+  'n_total',
+  'daily_vessel_calls',
+  'vessel_count',
+  'total_in_area',
+  'anchored_count',
+  'moored_count',
+  'underway_count',
+  'avg_dwell_hours',
+  'median_speed',
+])
+
+export function latestOperationalPortAnomalyById<
+  T extends Pick<AnomalyResponse, 'port_id' | 'time' | 'detected_at' | 'severity' | 'metric' | 'entity_type'>,
+>(anomalies: T[]): Map<number, T> {
+  return latestPortAnomalyById(
+    anomalies.filter(anomaly =>
+      anomaly.port_id != null &&
+      anomaly.entity_type === 'port' &&
+      (anomaly.severity === 'high' || anomaly.severity === 'medium') &&
+      OPERATIONAL_PORT_ANOMALY_METRICS.has(String(anomaly.metric ?? '')),
+    ),
+  )
+}
+
 export function buildPortViewModels(
   ports: PortResponse[],
   congestion: PortCongestionResponse[],

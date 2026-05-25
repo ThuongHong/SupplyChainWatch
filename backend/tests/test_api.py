@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import UTC, datetime, timedelta
 
 from app.api.routes.health import health
 from app.api.routes.insights import latest_insights
+from app.api.routes.sync import force_sync, sync_status
 from app.main import app
 
 
@@ -41,6 +43,56 @@ def test_health_endpoint() -> None:
     response = asyncio.run(health())
 
     assert response["status"] == "ok"
+
+
+def test_force_sync_returns_task_id(monkeypatch: object) -> None:
+    class FakeTask:
+        id = "task-123"
+
+    class FakeCollectAll:
+        @staticmethod
+        def delay() -> FakeTask:
+            return FakeTask()
+
+    monkeypatch.setattr("app.api.routes.sync.collect_all", FakeCollectAll)
+
+    payload = asyncio.run(force_sync())
+
+    assert payload == {"status": "queued", "task_id": "task-123"}
+
+
+def test_sync_status_reports_celery_state(monkeypatch: object) -> None:
+    class FakeResult:
+        status = "SUCCESS"
+        result = {"portwatch": {"status": "success", "rows": 10, "error": None}}
+
+        @staticmethod
+        def ready() -> bool:
+            return True
+
+        @staticmethod
+        def successful() -> bool:
+            return True
+
+        @staticmethod
+        def failed() -> bool:
+            return False
+
+    def fake_async_result(task_id: str) -> FakeResult:
+        assert task_id == "task-123"
+        return FakeResult()
+
+    monkeypatch.setattr("app.api.routes.sync.collect_all.AsyncResult", fake_async_result)
+
+    payload = asyncio.run(sync_status("task-123"))
+
+    assert payload == {
+        "task_id": "task-123",
+        "status": "success",
+        "ready": True,
+        "successful": True,
+        "error": None,
+    }
 
 
 def test_openapi_exposes_week2_routes() -> None:
@@ -120,12 +172,8 @@ def test_anomalies_endpoint_with_port_id() -> None:
                 "time": now - timedelta(days=7 - offset),
                 "port_id": 2,
                 "port_name": "Rotterdam",
-                "anchored_count": 10,
-                "moored_count": 5,
-                "underway_count": 5,
-                "total_in_area": 20,
-                "avg_dwell_hours": 15.0,
-                "median_speed": 4.5,
+                "metric_name": "portcalls",
+                "value": 20,
             }
         )
     db = FakeInsightsDb(rows)
@@ -175,3 +223,42 @@ def test_port_comparison_endpoint() -> None:
     assert len(payload) == 1
     assert payload[0]["port_name"] == "Singapore"
     assert payload[0]["value"] == 120.0
+
+
+def test_portwatch_demo_rows_are_filtered_from_port_api_queries() -> None:
+    from app.api.routes import ports
+
+    checked_functions = [
+        ports.current_port_congestion,
+        ports.port_congestion_timeline,
+        ports.port_activity,
+        ports.port_comparison,
+    ]
+
+    for function in checked_functions:
+        source = inspect.getsource(function)
+        assert "portwatch_demo" in source
+
+
+def test_portwatch_demo_rows_are_filtered_from_port_anomaly_queries() -> None:
+    from app.analysis import anomaly
+
+    checked_functions = [
+        anomaly.compute_port_historical_anomalies,
+        anomaly.compute_port_historical_anomalies_async,
+    ]
+
+    for function in checked_functions:
+        source = inspect.getsource(function)
+        assert "pm.source <> 'portwatch_demo'" in source
+
+
+def test_port_anomaly_query_does_not_alias_trade_flow_as_physical_congestion() -> None:
+    from app.analysis import anomaly
+
+    source = inspect.getsource(anomaly.compute_port_historical_anomalies_async)
+
+    assert "AS anchored_count" not in source
+    assert "AS avg_dwell_hours" not in source
+    assert "metric_name IN ('import'" not in source
+    assert "metric_name IN ('export'" not in source

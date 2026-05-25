@@ -401,6 +401,14 @@ export interface OverviewStats {
   generated_at: string;
 }
 
+export interface SyncTaskStatus {
+  task_id: string;
+  status: string;
+  ready: boolean;
+  successful: boolean;
+  error?: string | null;
+}
+
 export interface IndexHistoryParams {
   from?: string;
   to?: string;
@@ -469,6 +477,8 @@ export const apiClient = {
       ...init,
       method: "POST",
     }),
+  syncTaskStatus: (taskId: string, init?: RequestInit) =>
+    request<SyncTaskStatus>(`/api/sync/tasks/${encodeURIComponent(taskId)}`, init),
   globalPortRisk: (limit = 25, init?: RequestInit) =>
     request<RiskScoreResponse[]>(`/api/risk/ports${queryString({ limit })}`, init),
   congestionHeatmap: (init?: RequestInit) =>

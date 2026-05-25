@@ -45,12 +45,10 @@ import {
 } from '../api/viewModels'
 import type { PageId } from '../components/layout/Sidebar'
 
-type CatFilter = 'all' | InsightCategory
-const CATS: CatFilter[] = ['all', 'port_risk', 'risk_story', 'data_quality', 'correlation', 'trend', 'anomaly', 'forecast']
-const CAT_LABELS: Record<CatFilter, string> = { all: 'All', port_risk: 'Traffic Anomaly', risk_story: 'Risk Story', data_quality: 'Data Quality', correlation: 'Correlation', trend: 'Trend', anomaly: 'Anomaly', forecast: 'Forecast' }
-
 const displayName = (name: string) => name === 'FBX_GLOBAL' ? 'FBX' : name === 'WCI_GLOBAL' ? 'WCI' : name
 const apiName = (label: string) => label === 'FBX' ? 'FBX_GLOBAL' : label === 'WCI' ? 'WCI_GLOBAL' : label
+const reliabilityScore = (mape: number | null) => mape == null ? null : Math.max(0, Math.min(100, 100 - mape))
+const reliabilityTone = (score: number | null) => score == null ? 'default' : score >= 85 ? 'success' : score >= 70 ? 'warning' : 'danger'
 
 const metricBadgeValue = (value: unknown): string => {
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2)
@@ -162,18 +160,26 @@ const ForecastCard: React.FC<{ name: string; forecast?: ForecastResponse; isLoad
   const mape = metricValue(forecast?.metrics, 'mape') ?? metricValue(forecast?.metrics, 'MAPE')
   const mae = metricValue(forecast?.metrics, 'mae') ?? metricValue(forecast?.metrics, 'MAE')
   const rmse = metricValue(forecast?.metrics, 'rmse') ?? metricValue(forecast?.metrics, 'RMSE')
+  const score = reliabilityScore(mape)
+  const delta = usable.length >= 2 && usable[0].value != null && usable[usable.length - 1].value != null
+    ? (usable[usable.length - 1].value ?? 0) - (usable[0].value ?? 0)
+    : null
+  const direction = delta == null ? 'No forward path' : delta >= 0 ? 'Rising pressure' : 'Easing pressure'
 
   return (
     <Card style={{ padding: 14 }}>
       <SectionHeader
-        title={`${displayName(name)} Forecast`}
-        sub={forecast ? `${forecast.model_name ?? 'moving_average_baseline'} · ${forecast.horizon_days} days · ${relativeTime(forecast.created_at)}` : 'No forecast row returned'}
-        action={mape == null ? <Badge variant="default">MAPE n/a</Badge> : <Badge variant={mape <= 15 ? 'success' : mape <= 30 ? 'warning' : 'danger'}>MAPE {mape.toFixed(1)}%</Badge>}
+        title={`${displayName(name)} Forward Read`}
+        sub={forecast ? `${direction} over ${forecast.horizon_days} days · ${relativeTime(forecast.created_at)}` : 'No forecast row returned'}
+        action={score == null ? <Badge variant="default">Score n/a</Badge> : <Badge variant={reliabilityTone(score)}>Score {score.toFixed(1)}</Badge>}
       />
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-        <Badge variant="default">{forecast?.model_name ?? 'moving_average_baseline'}</Badge>
-        {mae != null && <Badge variant="default">MAE {mae.toFixed(1)}</Badge>}
-        {rmse != null && <Badge variant="default">RMSE {rmse.toFixed(1)}</Badge>}
+        <Badge variant={delta == null ? 'default' : delta >= 0 ? 'warning' : 'success'}>{delta == null ? 'Direction n/a' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} move`}</Badge>
+        {mape != null && (
+          <span title={`Model: ${forecast?.model_name ?? 'moving_average_baseline'} · MAE ${mae?.toFixed(1) ?? 'n/a'} · RMSE ${rmse?.toFixed(1) ?? 'n/a'}`}>
+            <Badge variant={mape <= 15 ? 'success' : mape <= 30 ? 'warning' : 'danger'}>MAPE {mape.toFixed(1)}% error</Badge>
+          </span>
+        )}
       </div>
       {isLoading && <SkeletonBlock height={90} lines={3} />}
       {!isLoading && Boolean(error) && <EmptyState title="No forecast yet" detail={error instanceof Error ? error.message : 'Backend returned no latest forecast.'} compact />}
@@ -252,7 +258,6 @@ const demoDashboardRiskRows = (): RiskScoreResponse[] => {
 
 export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNavigate }) => {
   const [showTour, setShowTour] = useState(() => localStorage.getItem('gsw-onboarding-seen') !== '1')
-  const [catFilter, setCatFilter] = useState<CatFilter>('all')
 
   const statsQuery = useQuery({
     queryKey: queryKeys.overview,
@@ -399,28 +404,31 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
   const fbxChange = percentChange(fbx)
   const evidenceCards = [
     {
-      label: 'Pipeline',
+      label: 'Data Health',
       value: freshnessRows.length ? `${freshSources}/${freshnessRows.length}` : '0',
       detail: freshnessRows.length ? 'sources fresh in latest API window' : 'source freshness not reported yet',
     },
     {
-      label: 'Analysis',
+      label: 'Anomalies',
       value: fmtNum((anomaliesQuery.data ?? []).length),
       detail: 'anomaly rows feeding trend, risk, and timeline views',
     },
     {
-      label: 'Dashboard',
+      label: 'Risk Rows',
       value: fmtNum(displayedRiskPorts.length),
       detail: 'ports ranked with PortWatch risk snapshots',
     },
     {
-      label: 'Interpretation',
+      label: 'Insights',
       value: fmtNum(liveInsights.length),
       detail: liveInsights.length ? 'live narratives available for review' : 'waiting for generated insight rows',
     },
   ]
 
-  const highRiskPorts = displayedRiskPorts.filter(row => row.severity === 'high').length
+  const topInsights = insights
+    .filter(insight => insight.attentionLevel === 'high' || insight.category === 'port_risk' || insight.category === 'risk_story' || insight.category === 'forecast')
+    .slice(0, 3)
+  const displayedTopInsights = topInsights.length ? topInsights : insights.slice(0, 3)
 
   const dismissTour = () => {
     localStorage.setItem('gsw-onboarding-seen', '1')
@@ -454,6 +462,39 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         )}
         {apiError && <ErrorPanel error={apiError} title="Some dashboard APIs are unavailable" compact />}
 
+        <Card style={{ padding: 16, borderColor: topPort?.severity === 'high' ? 'var(--danger)' : topPort?.severity === 'medium' ? 'var(--warning)' : 'var(--border-default)' }}>
+          <div className="overview-summary">
+            <div>
+              <div className="overview-summary__eyebrow">Executive Summary</div>
+              <div className="overview-summary__title">
+                {topPort
+                  ? `${topPort.entity_name} is the active supply-chain watchpoint.`
+                  : summaryUnavailable
+                    ? 'Global supply-chain risk is unavailable.'
+                    : risk.label}
+              </div>
+              <div className="overview-summary__detail">
+                {topPort
+                  ? `${Math.round(topPort.score)}/100 PortWatch risk. ${topPortDetail}`
+                  : summaryUnavailable
+                    ? 'Run collectors and risk scoring to populate overview signals.'
+                    : risk.detail}
+              </div>
+            </div>
+            <div className="overview-summary__actions">
+              <DataProvenance
+                mode={derivedRiskLive ? 'live' : portRiskQuery.isLoading ? 'loading' : 'empty'}
+                source="Dashboard live synthesis"
+                timestamp={liveStats ? `Updated ${relativeTime(liveStats.generated_at)}` : undefined}
+                stale={stale}
+              />
+              <button onClick={() => onNavigate?.('ports')} className="app-button">
+                <Icons.ArrowUpRight size={14} /> Inspect Port
+              </button>
+            </div>
+          </div>
+        </Card>
+
         <div className="evidence-strip">
           {evidenceCards.map(card => (
             <div className="evidence-card" key={card.label}>
@@ -486,23 +527,23 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         <Card style={{ padding: 16 }}>
           <SectionHeader
             title="Executive Brief"
-            sub="One-screen operational story from PortWatch risk, forecast, and source rows."
+            sub="Now, why, and next from PortWatch risk, forecast, and source rows."
             action={<DataProvenance mode={derivedRiskLive ? 'live' : portRiskQuery.isLoading ? 'loading' : 'empty'} source="Dashboard live synthesis" />}
           />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-            <div className="panel-note">
+          <div className="overview-timeline">
+            <div className="overview-timeline__item">
               <Badge variant={topPort ? (topPort.severity === 'high' ? 'danger' : topPort.severity === 'medium' ? 'warning' : 'success') : 'default'}>Current pressure</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {topPort ? `${topPort.entity_name} leads PortWatch risk at ${Math.round(topPort.score)}/100. ${topPortDetail}` : 'No live ranked PortWatch risk row is available yet.'}
               </div>
             </div>
-            <div className="panel-note">
+            <div className="overview-timeline__item">
               <Badge variant={riskStoryRows[0] ? riskTone(riskStoryRows[0].severity) : 'default'}>Latest story</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {riskStoryRows[0]?.narrative ?? 'No live risk story event has been generated for the top port.'}
               </div>
             </div>
-            <div className="panel-note">
+            <div className="overview-timeline__item">
               <Badge variant={riskForecastDirection ? riskForecastDirection.delta >= 0 ? 'warning' : 'success' : staleSources ? 'danger' : 'default'}>Forward read</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {riskForecastDirection
@@ -515,31 +556,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           </div>
         </Card>
 
-        <div className="responsive-grid grid-main-side">
-          <Card style={{ padding: '16px', minWidth: 0 }}>
-            <SectionHeader
-              title="Global PortWatch Risk Ranking"
-              sub={displayedRiskPorts.length ? `${displayedRiskPorts.length} monitored ports ranked` : useDemoRiskPorts ? 'Demo fallback risk' : 'Awaiting PortWatch risk snapshots'}
-              action={<DataProvenance mode={rowDataMode({ loading: portRiskQuery.isLoading, error: portRiskQuery.error, rowCount: displayedRiskPorts.length, demoEnabled: ENABLE_DEMO_FALLBACK })} source="PortWatch risk snapshots" />}
-            />
-            {portRiskQuery.isLoading ? <SkeletonBlock height={200} /> : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {displayedRiskPorts.slice(0, 7).map(port => (
-                  <div key={port.entity_id} className="row-compact">
-                    <span style={{ fontSize: 12, fontWeight: 600 }}>{port.entity_name}</span>
-                    <Badge variant={port.severity === 'high' ? 'danger' : port.severity === 'medium' ? 'warning' : 'success'}>
-                      {port.severity.toUpperCase()}
-                    </Badge>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                      score {Math.round(port.score)}/100 · {port.reasons?.[0] ?? port.freshness_status}
-                    </span>
-                  </div>
-                ))}
-                {displayedRiskPorts.length === 0 && <EmptyState title="No PortWatch risk snapshots" detail="Run PortWatch collection and maritime risk scoring to populate this ranking." compact />}
-              </div>
-            )}
-          </Card>
-
+        <div>
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader
               title="Risk Source Coverage"
@@ -575,13 +592,13 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           </Card>
 
           <Card style={{ padding: '16px', minWidth: 0 }}>
-            <SectionHeader title="Operational Pulse" sub="High-level systemic pressure indicators" />
+            <SectionHeader title="Market Pulse" sub="Freight index direction without duplicate system-health signals" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[
                 { label: 'BDI (Raw Materials) Trend', value: bdiChange == null ? 'No live trend' : fmtPct(bdiChange), tone: bdiChange != null && bdiChange > 0 ? 'var(--success)' : 'var(--danger)' },
                 { label: 'FBX (Containers) Trend', value: fbxChange == null ? 'No live trend' : fmtPct(fbxChange), tone: fbxChange != null && fbxChange > 0 ? 'var(--warning)' : 'var(--success)' },
-                { label: 'Elevated PortWatch risk', value: displayedRiskPorts.length ? `${highRiskPorts} flagged` : 'No live risk rows', tone: highRiskPorts > 0 ? 'var(--danger)' : 'var(--text-primary)' },
-                { label: 'Data Freshness (API Sync)', value: liveStats ? relativeTime(liveStats.generated_at) : 'Unavailable', tone: stale ? 'var(--warning)' : 'var(--success)' },
+                { label: 'Supported Indexes', value: supportedNames.length ? supportedNames.map(displayName).join(' / ') : 'No live indexes', tone: supportedNames.length >= 2 ? 'var(--success)' : 'var(--warning)' },
+                { label: 'Correlation Window', value: supportedNames.length >= 2 ? '180 days' : 'Waiting for overlap', tone: supportedNames.length >= 2 ? 'var(--info)' : 'var(--text-muted)' },
               ].map(row => (
                 <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                   <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>{row.label}</span>
@@ -595,33 +612,25 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           </Card>
         </div>
 
-        {/* Global Intelligence & Market Analysis Section */}
+        {/* Top Insights & Market Analysis Section */}
         <div style={{ marginTop: 24, marginBottom: 8 }}>
           <SectionHeader
-            title="Global Intelligence & Market Analysis"
-            sub="Evidence-backed narratives, PortWatch risk snapshots, index correlations, and forecasts"
+            title="Top Insights & Market Analysis"
+            sub="Highest-priority narratives, index correlations, and forward reads"
           />
         </div>
 
-        <div className="responsive-grid grid-feed">
-          <div style={{ minWidth: 0 }}>
-            <div className="tab-strip">
-              {CATS.map(cat => (
-                <button
-                  key={cat}
-                  className={catFilter === cat ? 'tab-button tab-button--active' : 'tab-button'}
-                  onClick={() => setCatFilter(cat)}
-                >
-                  {CAT_LABELS[cat]}
-                </button>
-              ))}
+        <div className="responsive-grid grid-feed" style={{ alignItems: 'start' }}>
+          <div style={{ minWidth: 0, maxHeight: 520, overflow: 'auto', paddingRight: 4 }}>
+            <div className="tab-strip" style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-base)', paddingBottom: 8 }}>
+              <Badge variant="accent">Top 3 insight feed</Badge>
+              <button onClick={() => onNavigate?.('analytics')} className="tab-button">Open full analysis</button>
             </div>
 
             <Card style={{ padding: '4px 16px', minWidth: 0 }}>
               {insightsQuery.isLoading && <SkeletonBlock height={180} lines={5} />}
               {!insightsQuery.isLoading && useDemoInsights && <DataProvenance mode="demo" source="Explicit demo examples until insight rows exist" />}
-              {insights
-                .filter(ins => catFilter === 'all' || ins.category === catFilter)
+              {displayedTopInsights
                 .map((insight, i) => (
                   <div key={`${insight.title}-${i}`} style={{ borderBottom: '1px solid var(--border-subtle)', padding: '12px 0' }}>
                     <InsightRow text={insight.text} category={insight.category} time={insight.time} aiGenerated={insight.aiGenerated ?? false} />
@@ -634,15 +643,15 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
                     {insight.metrics && <MiniMetricBars metrics={insight.metrics} />}
                   </div>
                 ))}
-              {insights.filter(ins => catFilter === 'all' || ins.category === catFilter).length === 0 && (
+              {displayedTopInsights.length === 0 && (
                 <div style={{ padding: '24px 0' }}>
-                  <EmptyState title="No matching insights" detail={`No insights generated for category "${catFilter}" in current window.`} compact />
+                  <EmptyState title="No priority insights" detail="No generated insight rows are available in the current window." compact />
                 </div>
               )}
             </Card>
           </div>
 
-          <Card style={{ padding: 16, minWidth: 0 }}>
+          <Card style={{ padding: 16, minWidth: 0, maxHeight: 520, overflow: 'auto' }}>
             <SectionHeader
               title="Correlation Heatmap"
               sub={labels.length ? labels.join(' · ') : 'Waiting for index overlap'}
@@ -653,10 +662,10 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         </div>
 
         <div className="responsive-grid grid-two" style={{ marginTop: 16 }}>
-          <Card style={{ padding: 16 }}>
+          <Card style={{ padding: 16, maxHeight: 360, overflow: 'auto' }}>
             <SectionHeader
-              title="Forecast Reliability"
-              sub="Evaluation of autoregressive machine learning models against observed shipping indexes."
+              title="What May Change Next"
+              sub="Forward market direction first; model error stays available as supporting evidence."
             />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
               {supportedNames.slice(0, 3).map((name, idx) => {

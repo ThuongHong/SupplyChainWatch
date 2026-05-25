@@ -17,7 +17,7 @@ import {
   type VesselWatchlistResponse,
 } from '../api/client'
 import { queryKeys } from '../api/queries'
-import { latestPortAnomalyById } from '../api/viewModels'
+import { latestOperationalPortAnomalyById } from '../api/viewModels'
 import { EmptyState, ErrorPanel } from '../components/DataState'
 
 // ---- Vessel types ----
@@ -284,7 +284,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
 
   const ports = useMemo(() => {
     if (!portsQuery.data) return [];
-    const latestAnomalyByPort = latestPortAnomalyById(anomalies)
+    const latestAnomalyByPort = latestOperationalPortAnomalyById(anomalies)
     return portsQuery.data.map(port => {
       const congestion = congestionQuery.data?.find(c => c.port_id === port.id);
       const latestAnomaly = latestAnomalyByPort.get(port.id);

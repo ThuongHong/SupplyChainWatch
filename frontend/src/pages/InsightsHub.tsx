@@ -70,6 +70,8 @@ const normalizeCategory = (category?: string | null): InsightCategory => {
 const insightText = (insight: InsightResponse) => insight.narrative_llm || insight.narrative
 const displayName = (name: string) => name === 'FBX_GLOBAL' ? 'FBX' : name === 'WCI_GLOBAL' ? 'WCI' : name
 const apiName = (label: string) => label === 'FBX' ? 'FBX_GLOBAL' : label === 'WCI' ? 'WCI_GLOBAL' : label
+const reliabilityScore = (mape: number | null) => mape == null ? null : Math.max(0, Math.min(100, 100 - mape))
+const reliabilityTone = (score: number | null) => score == null ? 'default' : score >= 85 ? 'success' : score >= 70 ? 'warning' : 'danger'
 const metricBadgeValue = (value: unknown): string => {
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2)
   if (typeof value === 'string' || typeof value === 'boolean') return String(value)
@@ -149,14 +151,16 @@ const ForecastCard: React.FC<{ name: string; forecast?: ForecastResponse; isLoad
   const points = forecastPoints(forecast).slice(0, forecast?.horizon_days ?? 14)
   const usable = points.map(point => ({ point, value: forecastValue(point), lower: forecastLower(point), upper: forecastUpper(point) })).filter(item => item.value != null)
   const mape = metricValue(forecast?.metrics, 'mape') ?? metricValue(forecast?.metrics, 'MAPE')
+  const score = reliabilityScore(mape)
 
   return (
     <Card style={{ padding: 14 }}>
       <SectionHeader
         title={`${displayName(name)} Forecast`}
         sub={forecast ? `${forecast.model_name ?? 'model'} · generated ${relativeTime(forecast.created_at)}` : 'Backend forecast row not available'}
-        action={mape == null ? <Badge variant="default">Reliability n/a</Badge> : <Badge variant={mape <= 15 ? 'success' : mape <= 30 ? 'warning' : 'danger'}>MAPE {mape.toFixed(1)}%</Badge>}
+        action={score == null ? <Badge variant="default">Score n/a</Badge> : <Badge variant={reliabilityTone(score)}>Score {score.toFixed(1)}</Badge>}
       />
+      {mape != null && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}><Badge variant={mape <= 15 ? 'success' : mape <= 30 ? 'warning' : 'danger'}>MAPE {mape.toFixed(1)}% error</Badge></div>}
       {isLoading && <SkeletonBlock height={92} />}
       {!isLoading && Boolean(error) && <EmptyState title="No forecast yet" detail={error instanceof Error ? error.message : 'Missing forecast row.'} compact />}
       {!isLoading && !error && usable.length > 0 && (

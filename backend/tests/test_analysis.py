@@ -6,7 +6,7 @@ import pytest
 
 from app.analysis.anomaly import rolling_z_score, severity_from_z_score
 from app.analysis.correlation import correlation_matrix, pearson_correlation
-from app.analysis.forecast import _moving_average
+from app.analysis.forecast import _moving_average, _trend_forecast, generate_index_forecast
 from app.analysis.insight_generator import _generate_source_health_insights
 from app.analysis.maritime_risk import (
     economic_pressure_context,
@@ -39,8 +39,10 @@ class FakeInsightDb:
         self.rows = rows
         self.added: list[object] = []
         self.params: dict[str, object] | None = None
+        self.statement: object | None = None
 
     def execute(self, statement: object, params: dict[str, object]) -> FakeResult:
+        self.statement = statement
         self.params = params
         return FakeResult(self.rows)
 
@@ -83,6 +85,34 @@ def test_severity_mapping() -> None:
 
 def test_moving_average_uses_recent_window() -> None:
     assert _moving_average([1, 2, 3, 10, 20], window=2) == pytest.approx(15)
+
+
+def test_trend_forecast_projects_recent_direction() -> None:
+    predictions = _trend_forecast([100, 105, 110, 115, 120], horizon_days=3, window=5)
+
+    assert predictions == pytest.approx([125, 130, 135])
+
+
+def test_index_forecast_uses_non_flat_trend_baseline() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = [
+        {"time": start + timedelta(days=offset), "value": 100.0 + offset * 5}
+        for offset in range(30)
+    ]
+    db = FakeInsightDb(rows)
+
+    created = generate_index_forecast(db, "BDI", horizon_days=7)  # type: ignore[arg-type]
+
+    assert created == 1
+    assert db.params == {"index_name": "BDI"}
+    assert "date_trunc('day', time)" in str(db.statement)
+    forecast = db.added[0]
+    yhat = [point["yhat"] for point in forecast.predictions]
+    assert len(set(yhat)) > 1
+    assert yhat == sorted(yhat)
+    assert forecast.model_name == "linear_trend_baseline"
 
 
 def test_portwatch_score_components_include_missing_metadata() -> None:
@@ -195,9 +225,6 @@ def test_compute_port_historical_anomalies() -> None:
 
     now = datetime.now(UTC)
     # Mock rows represent portwatch_metrics-derived data (not port_congestion).
-    # Column names match what compute_port_historical_anomalies reads from its
-    # portwatch_metrics JOIN query (total_in_area, anchored_count, avg_dwell_hours,
-    # median_speed are aliases for the PortWatch metric values).
     # AISStream tables (vessel_positions, port_congestion) are not consulted.
     rows = []
     for i in range(1, 10):
@@ -206,24 +233,20 @@ def test_compute_port_historical_anomalies() -> None:
                 "time": now - timedelta(days=10 - i),
                 "port_id": 1,
                 "port_name": "Test Port",
-                "anchored_count": 5 + (i % 2),  # alternates 5 and 6
-                "total_in_area": 10 + (i % 2),  # alternates 10 and 11
-                "avg_dwell_hours": 12.0,
-                "median_speed": 5.0,
+                "metric_name": "portcalls",
+                "value": 10 + (i % 2),  # alternates 10 and 11
             }
         )
     # Add a tenth point (today) with a high-anomaly spike
     rows.append(
-        {
-            "time": now,
-            "port_id": 1,
-            "port_name": "Test Port",
-            "anchored_count": 35,
-            "total_in_area": 40,
-            "avg_dwell_hours": 48.0,
-            "median_speed": 1.0,
-        }
-    )
+            {
+                "time": now,
+                "port_id": 1,
+                "port_name": "Test Port",
+                "metric_name": "portcalls",
+                "value": 40,
+            }
+        )
 
     db = FakeInsightDb(rows)
     anomalies = compute_port_historical_anomalies(db, days=30)  # type: ignore[arg-type]

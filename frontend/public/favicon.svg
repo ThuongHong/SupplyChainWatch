@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">GlobalSupplyWatch browser icon</title>
+  <desc id="desc">GlobalSupplyWatch port and supply chain monitoring icon.</desc>
+  <rect width="64" height="64" rx="12" fill="#0f172a"/>
+  <path d="M12 42h40v5H12z" fill="#38bdf8"/>
+  <path d="M18 36h28l5 6H13z" fill="#f8fafc"/>
+  <path d="M23 25h18v11H23z" fill="#22c55e"/>
+  <path d="M27 17h10v8H27z" fill="#f59e0b"/>
+  <path d="M12 49c6 3 10 3 16 0s10-3 16 0 8 2 8 2v5s-4 1-8-1c-6-3-10-3-16 0s-10 3-16 0z" fill="#2563eb"/>
+</svg>

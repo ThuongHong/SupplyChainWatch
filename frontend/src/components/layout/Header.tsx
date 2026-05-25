@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useQuery, useIsFetching, useQueryClient } from '@tanstack/react-query'
 import { apiClient, API_BASE_URL } from '../../api/client'
 import { queryKeys } from '../../api/queries'
@@ -14,6 +14,12 @@ const PAGE_META: Record<PageId, { parent: string; title: string }> = {
   analytics: { parent: 'Intelligence', title: 'Exploratory Analysis' },
 }
 
+const SYNC_POLL_INTERVAL_MS = 2_000
+const SYNC_MAX_POLLS = 15
+const ACTIVE_SYNC_TASK_KEY = 'gsw-active-sync-task-id'
+
+const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
+
 interface HeaderProps {
   theme: 'dark' | 'light'
   onThemeToggle: () => void
@@ -24,6 +30,66 @@ export const Header: React.FC<HeaderProps> = ({ theme, onThemeToggle, page }) =>
   const queryClient = useQueryClient()
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
+  const mounted = useRef(true)
+  const pollingTaskId = useRef<string | null>(null)
+
+  useEffect(() => {
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  const clearActiveSyncTask = () => {
+    localStorage.removeItem(ACTIVE_SYNC_TASK_KEY)
+    pollingTaskId.current = null
+  }
+
+  const finishSyncState = async (message: string, delayMs: number) => {
+    setSyncStatus(message)
+    await wait(delayMs)
+    if (mounted.current) {
+      setIsSyncing(false)
+      setSyncStatus(null)
+    }
+  }
+
+  const pollSyncTask = async (taskId: string) => {
+    pollingTaskId.current = taskId
+    setIsSyncing(true)
+    setSyncStatus(`Queued ${taskId.slice(0, 8)}`)
+    try {
+      for (let attempt = 0; attempt < SYNC_MAX_POLLS; attempt += 1) {
+        const task = await apiClient.syncTaskStatus(taskId)
+        if (!mounted.current || pollingTaskId.current !== taskId) return
+        if (task.successful) {
+          clearActiveSyncTask()
+          await queryClient.invalidateQueries()
+          await finishSyncState('Sync complete', 1800)
+          return
+        }
+        if (task.ready || task.status === 'failure' || task.status === 'revoked') {
+          clearActiveSyncTask()
+          await finishSyncState(task.error ? `Sync failed: ${task.error.slice(0, 48)}` : 'Sync failed', 3600)
+          return
+        }
+        setSyncStatus(task.status === 'started' ? 'Sync running...' : 'Queued...')
+        await wait(SYNC_POLL_INTERVAL_MS)
+      }
+      await queryClient.invalidateQueries()
+      await finishSyncState('Worker still running', 3600)
+    } catch (err) {
+      console.error(err)
+      clearActiveSyncTask()
+      await finishSyncState('Queue failed', 3600)
+    }
+  }
+
+  useEffect(() => {
+    const taskId = localStorage.getItem(ACTIVE_SYNC_TASK_KEY)
+    if (taskId) void pollSyncTask(taskId)
+    // Run only on mount so a stored backend task resumes after tab/page changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const health = useQuery({
     queryKey: queryKeys.health,
@@ -40,17 +106,13 @@ export const Header: React.FC<HeaderProps> = ({ theme, onThemeToggle, page }) =>
     setIsSyncing(true)
     setSyncStatus('Queued...')
     try {
-      await apiClient.forceSync()
-      setSyncStatus('Syncing...')
-      setTimeout(() => {
-        queryClient.invalidateQueries()
-        setIsSyncing(false)
-        setSyncStatus(null)
-      }, 4000)
+      const queued = await apiClient.forceSync()
+      localStorage.setItem(ACTIVE_SYNC_TASK_KEY, queued.task_id)
+      await pollSyncTask(queued.task_id)
     } catch (err) {
       console.error(err)
-      setIsSyncing(false)
-      setSyncStatus(null)
+      clearActiveSyncTask()
+      await finishSyncState('Queue failed', 3600)
     }
   }
 

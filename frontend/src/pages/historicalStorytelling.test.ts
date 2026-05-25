@@ -50,6 +50,26 @@ describe('historical storytelling uses real data only', () => {
     expect(source).not.toMatch(/No live AIS telemetry/)
   })
 
+  it('keeps Global Intelligence compact with internal scroll containers', () => {
+    const source = readPage('Dashboard.tsx')
+
+    expect(source).toMatch(/maxHeight: 520/)
+    expect(source).toMatch(/overflow: 'auto'/)
+    expect(source).toMatch(/position: 'sticky'/)
+    expect(source).toMatch(/maxHeight: 360/)
+  })
+
+  it('labels forecast reliability as score and MAPE as error', () => {
+    const dashboard = readPage('Dashboard.tsx')
+    const insightsHub = readPage('InsightsHub.tsx')
+
+    for (const source of [dashboard, insightsHub]) {
+      expect(source).toMatch(/reliabilityScore/)
+      expect(source).toMatch(/Score \{score\.toFixed\(1\)\}/)
+      expect(source).toMatch(/MAPE \{mape\.toFixed\(1\)\}% error/)
+    }
+  })
+
   it('shows Ports detail history gaps without fabricated timeline values', () => {
     const source = readPage('Ports.tsx')
 

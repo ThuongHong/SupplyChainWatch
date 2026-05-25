@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { latestPortAnomalyById, rowDataMode, shouldUseDemoRows } from './viewModels'
+import { latestOperationalPortAnomalyById, latestPortAnomalyById, rowDataMode, shouldUseDemoRows } from './viewModels'
 
 describe('latestPortAnomalyById', () => {
   it('uses the newest anomaly row for each port instead of any older high severity row', () => {
@@ -11,6 +11,19 @@ describe('latestPortAnomalyById', () => {
 
     expect(byPort.get(1)?.severity).toBe('low')
     expect(byPort.get(2)?.severity).toBe('medium')
+  })
+})
+
+describe('latestOperationalPortAnomalyById', () => {
+  it('ignores trade-flow anomalies when coloring Vessel Map port markers', () => {
+    const byPort = latestOperationalPortAnomalyById([
+      { entity_type: 'port', port_id: 32, severity: 'high', metric: 'import', detected_at: '2026-05-15T00:00:00Z' },
+      { entity_type: 'port', port_id: 32, severity: 'low', metric: 'portcalls', detected_at: '2026-05-14T00:00:00Z' },
+      { entity_type: 'port', port_id: 1, severity: 'medium', metric: 'portcalls', detected_at: '2026-05-15T00:00:00Z' },
+    ])
+
+    expect(byPort.has(32)).toBe(false)
+    expect(byPort.get(1)?.severity).toBe('medium')
   })
 })
 

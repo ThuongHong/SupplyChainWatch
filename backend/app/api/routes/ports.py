@@ -56,6 +56,7 @@ async def current_port_congestion(
                 FROM portwatch_metrics pm
                 WHERE pm.metric_name = 'portcalls'
                   AND pm.entity_name = p.name
+                  AND pm.source <> 'portwatch_demo'
                 ORDER BY pm.observed_at DESC
                 LIMIT 1
             ) pw_portcalls ON TRUE
@@ -108,6 +109,7 @@ async def port_congestion_timeline(
                 JOIN ports p ON p.name = pm.entity_name
                 WHERE p.id = :port_id
                   AND pm.metric_name = 'portcalls'
+                  AND pm.source <> 'portwatch_demo'
                   AND pm.observed_at >= NOW() - (:days * INTERVAL '1 day')
                 ORDER BY pm.observed_at ASC
                 """),
@@ -131,6 +133,7 @@ async def port_activity(
         FROM portwatch_metrics pm
         JOIN ports p ON p.name = pm.entity_name
         WHERE pm.metric_name = ANY(:db_metrics)
+          AND pm.source <> 'portwatch_demo'
           AND pm.observed_at >= NOW() - (:days * INTERVAL '1 day')
     """
     params: dict[str, object] = {"days": days, "db_metrics": ["n_total", "portcalls"]}
@@ -168,6 +171,7 @@ async def port_comparison(
         FROM portwatch_metrics pm
         JOIN ports p ON p.name = pm.entity_name
         WHERE pm.metric_name = ANY(:db_metrics)
+          AND pm.source <> 'portwatch_demo'
           AND pm.observed_at >= NOW() - (:days * INTERVAL '1 day')
         GROUP BY p.id, p.name
         ORDER BY value DESC
