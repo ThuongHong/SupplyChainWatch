@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.analysis.anomaly import rolling_z_score, severity_from_z_score
@@ -11,6 +13,9 @@ from app.analysis.maritime_risk import (
     score_components,
     weather_route_impact,
 )
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeMappings:
@@ -141,13 +146,59 @@ def test_source_health_insights_explain_coverage_gaps() -> None:
     assert insight.attention_level == "watch"
 
 
+def test_analysis_and_llm_paths_do_not_query_aisstream_tables() -> None:
+    forbidden_sql = (
+        "FROM port_congestion",
+        "JOIN port_congestion",
+        "FROM vessel_positions",
+        "JOIN vessel_positions",
+        "FROM chokepoint_status",
+        "JOIN chokepoint_status",
+    )
+    checked_files = [
+        PROJECT_ROOT / "app" / "api" / "routes" / "stats.py",
+        PROJECT_ROOT / "app" / "llm" / "story_mode.py",
+        PROJECT_ROOT / "app" / "llm" / "narrator.py",
+        PROJECT_ROOT / "app" / "llm" / "anomaly_explainer.py",
+        PROJECT_ROOT / "app" / "llm" / "forecast_commenter.py",
+    ]
+
+    offenders = [
+        f"{path.relative_to(PROJECT_ROOT)}: {needle}"
+        for path in checked_files
+        for needle in forbidden_sql
+        if needle in path.read_text()
+    ]
+
+    assert offenders == []
+
+
+def test_forecast_and_narrator_payloads_do_not_emit_ais_congestion_signal_names() -> None:
+    checked_files = [
+        PROJECT_ROOT / "app" / "llm" / "narrator.py",
+        PROJECT_ROOT / "app" / "llm" / "anomaly_explainer.py",
+        PROJECT_ROOT / "app" / "llm" / "forecast_commenter.py",
+    ]
+    offenders = [
+        str(path.relative_to(PROJECT_ROOT))
+        for path in checked_files
+        if "average_port_congestion" in path.read_text()
+    ]
+
+    assert offenders == []
+
+
 def test_compute_port_historical_anomalies() -> None:
     from datetime import UTC, datetime, timedelta
 
     from app.analysis.anomaly import compute_port_historical_anomalies
 
     now = datetime.now(UTC)
-    # Generate baseline data: 9 points over the last 9 days
+    # Mock rows represent portwatch_metrics-derived data (not port_congestion).
+    # Column names match what compute_port_historical_anomalies reads from its
+    # portwatch_metrics JOIN query (total_in_area, anchored_count, avg_dwell_hours,
+    # median_speed are aliases for the PortWatch metric values).
+    # AISStream tables (vessel_positions, port_congestion) are not consulted.
     rows = []
     for i in range(1, 10):
         rows.append(
@@ -156,22 +207,18 @@ def test_compute_port_historical_anomalies() -> None:
                 "port_id": 1,
                 "port_name": "Test Port",
                 "anchored_count": 5 + (i % 2),  # alternates 5 and 6
-                "moored_count": 2,
-                "underway_count": 3,
                 "total_in_area": 10 + (i % 2),  # alternates 10 and 11
                 "avg_dwell_hours": 12.0,
                 "median_speed": 5.0,
             }
         )
-    # Add a tenth point (today) that has high congestion
+    # Add a tenth point (today) with a high-anomaly spike
     rows.append(
         {
             "time": now,
             "port_id": 1,
             "port_name": "Test Port",
             "anchored_count": 35,
-            "moored_count": 2,
-            "underway_count": 3,
             "total_in_area": 40,
             "avg_dwell_hours": 48.0,
             "median_speed": 1.0,

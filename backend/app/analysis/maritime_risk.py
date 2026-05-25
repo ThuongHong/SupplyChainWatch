@@ -1,3 +1,15 @@
+"""Maritime risk score computation.
+
+.. note:: AISStream boundary
+    The ``vessel_positions`` and ``port_congestion`` tables are populated by
+    AISStream and are reserved **exclusively** for live map visualisation and
+    current vessel / port display.  They MUST NOT be used as inputs to risk
+    score computation, port risk scores, or dashboard alerts.  All
+    AIS-derived congestion signals have been removed from this module;
+    port risk is computed solely from ``portwatch_metrics``, ``freight_indices``
+    (weather), and PortWatch freshness.
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -30,45 +42,204 @@ CHOKEPOINT_COMPONENTS = {
 
 
 def compute_maritime_risk_scores(db: Session) -> int:
+    """Compute and persist port and chokepoint risk scores.
+
+    Data sources: ``portwatch_metrics`` and ``freight_indices`` only.
+    The AISStream-derived ``port_congestion`` table is **not** queried here;
+    it is reserved for live map visualisation.
+    """
+    # Fetch latest weather context
+    weather_res = db.execute(text("""
+        SELECT DISTINCT ON (index_name) index_name, value
+        FROM freight_indices
+        WHERE source = 'openmeteo_marine'
+        ORDER BY index_name, time DESC
+    """)).mappings().all()
+    max_wave = max([float(r["value"]) for r in weather_res], default=0.0)
+    weather_score = round(min(15.0, (max_wave / 4.0) * 15.0), 2)
+
+    # Fetch all ports
+    ports_res = db.execute(text("SELECT id, locode, name FROM ports")).mappings().all()
+
+    # Fetch latest PortWatch metrics and baselines
     rows = _latest_portwatch_metrics(db)
     baselines = _historical_baselines(db)
     grouped: dict[tuple[str, str, str], dict[str, float]] = {}
     latest_time: dict[tuple[str, str, str], datetime] = {}
+    metric_times: dict[tuple[str, str, str], dict[str, datetime]] = {}
+
     for row in rows:
         key = (str(row["entity_type"]), str(row["entity_id"]), str(row["entity_name"]))
         grouped.setdefault(key, {})[str(row["metric_name"])] = float(row["metric_value"])
         latest_time[key] = max(latest_time.get(key, row["observed_at"]), row["observed_at"])
+        metric_times.setdefault(key, {})[str(row["metric_name"])] = row["observed_at"]
 
     created = 0
     now = datetime.now(UTC)
+    processed_port_entity_ids = set()
+
+    # We first process grouped entities (both ports and chokepoints)
     for (entity_type, entity_id, entity_name), metrics in grouped.items():
-        components, missing, reasons = score_components(
-            metrics,
-            entity_type=entity_type,
-            baselines=baselines.get((entity_type, entity_id), {}),
-        )
-        score = round(sum(components.values()) / max(len(components), 1), 2)
+        if entity_type == "port":
+            processed_port_entity_ids.add(entity_id)
+            # Resolve port_id
+            port_id = None
+            for p in ports_res:
+                if p["locode"] == entity_id.replace("port-", "").upper() or p["name"].lower() == entity_name.lower():
+                    port_id = p["id"]
+                    break
+
+            # AISStream boundary: port_congestion is visualization-only.
+            # congestion_score is always 0.0; risk is derived from PortWatch metrics only.
+            congestion_score = 0.0
+
+            # Anomaly Score (0 to 45) — based on PortWatch metric deviation from baseline
+            anomaly_score = 0.0
+            pw_times = metric_times.get((entity_type, entity_id, entity_name), {})
+            fresh_pw_metrics = []
+            entity_baselines = baselines.get((entity_type, entity_id), {})
+            for m_name, m_val in metrics.items():
+                m_time = pw_times.get(m_name)
+                # Check if PortWatch metric is fresh (within 72 hours of now)
+                if m_time and (now - m_time.astimezone(UTC)).total_seconds() <= 72 * 3600:
+                    base_val = entity_baselines.get(m_name)
+                    if base_val and base_val > 0:
+                        change_pct = (m_val - base_val) / base_val * 100
+                        fresh_pw_metrics.append(min(45.0, abs(change_pct) * 0.9))
+            if fresh_pw_metrics:
+                anomaly_score = round(sum(fresh_pw_metrics) / len(fresh_pw_metrics), 2)
+
+            # Weather Score (0 to 15) — calculated globally as weather_score
+
+            # Data Quality Penalty (0 to 10) — based solely on PortWatch freshness.
+            # AIS data quality is not included; port_congestion is visualization-only.
+            pw_penalty = 10.0
+            if pw_times:
+                latest_pw_time = max(pw_times.values())
+                if (now - latest_pw_time.astimezone(UTC)).total_seconds() <= 72 * 3600:
+                    pw_penalty = 0.0
+                else:
+                    pw_penalty = 6.0
+
+            data_quality_penalty = min(10.0, pw_penalty)
+
+            # Sum composite score
+            score = round(congestion_score + anomaly_score + weather_score + data_quality_penalty, 2)
+            severity = severity_for_score(score)
+            as_of = latest_time[(entity_type, entity_id, entity_name)]
+
+            components = {
+                "portwatch_anomaly": anomaly_score,
+                "weather": weather_score,
+                "data_quality": data_quality_penalty,
+            }
+
+            reasons = []
+            if anomaly_score >= 30:
+                reasons.append(f"Significant PortWatch traffic anomaly: score {anomaly_score:.1f}/45")
+            elif anomaly_score >= 15:
+                reasons.append(f"Moderate PortWatch traffic anomaly: score {anomaly_score:.1f}/45")
+
+            if weather_score >= 10:
+                reasons.append(f"Severe marine weather: score {weather_score:.1f}/15")
+            elif weather_score >= 5:
+                reasons.append(f"Moderate marine weather: score {weather_score:.1f}/15")
+
+            if data_quality_penalty >= 7:
+                reasons.append(f"Stale PortWatch data: penalty {data_quality_penalty:.1f}/10")
+            elif data_quality_penalty >= 3:
+                reasons.append(f"Aging PortWatch data: penalty {data_quality_penalty:.1f}/10")
+
+            if not reasons:
+                reasons.append("All PortWatch metrics within normal operational bounds.")
+
+            common = {
+                "time": now,
+                "port_id": port_id,
+                "entity_id": entity_id,
+                "entity_name": entity_name,
+                "score": score,
+                "severity": severity,
+                "component_scores": components,
+                "missing_components": [k for k, v in components.items() if v == 0.0],
+                "reasons": reasons,
+                "source_metrics": metrics,
+                "freshness_status": freshness_status(as_of),
+                "as_of": as_of,
+            }
+            db.add(PortRiskScore(**common))
+            created += 1
+
+        else:
+            # Chokepoint or region
+            components, missing, reasons = score_components(
+                metrics,
+                entity_type=entity_type,
+                baselines=baselines.get((entity_type, entity_id), {}),
+            )
+            score = round(sum(components.values()) / max(len(components), 1), 2)
+            severity = severity_for_score(score)
+            as_of = latest_time[(entity_type, entity_id, entity_name)]
+            common = {
+                "time": now,
+                "entity_id": entity_id,
+                "entity_name": entity_name,
+                "score": score,
+                "severity": severity,
+                "component_scores": components,
+                "missing_components": missing,
+                "reasons": reasons,
+                "source_metrics": metrics,
+                "freshness_status": freshness_status(as_of),
+                "as_of": as_of,
+            }
+            db.add(ChokepointRiskScore(**common))
+            created += 1
+
+    # Handle ports that have NO PortWatch metrics at all yet
+    for port in ports_res:
+        entity_id = f"port-{port['locode'].lower()}" if port["locode"] else f"port-{port['id']}"
+        if entity_id in processed_port_entity_ids:
+            continue
+
+        # AISStream boundary: port_congestion is visualization-only.
+        # No congestion score is computed here.
+        congestion_score = 0.0
+
+        pw_penalty = 10.0  # No PortWatch data at all
+        data_quality_penalty = min(10.0, pw_penalty)
+
+        score = round(congestion_score + weather_score + data_quality_penalty, 2)
         severity = severity_for_score(score)
-        as_of = latest_time[(entity_type, entity_id, entity_name)]
+        as_of = now
+
+        components = {
+            "portwatch_anomaly": 0.0,
+            "weather": weather_score,
+            "data_quality": data_quality_penalty,
+        }
+
+        reasons = ["No PortWatch metrics available."]
+        if data_quality_penalty >= 5:
+            reasons.append(f"Missing PortWatch data: penalty {data_quality_penalty:.1f}/10")
+
         common = {
             "time": now,
+            "port_id": port["id"],
             "entity_id": entity_id,
-            "entity_name": entity_name,
+            "entity_name": port["name"],
             "score": score,
             "severity": severity,
             "component_scores": components,
-            "missing_components": missing,
+            "missing_components": ["portwatch_metrics"],
             "reasons": reasons,
-            "source_metrics": metrics,
+            "source_metrics": {},
             "freshness_status": freshness_status(as_of),
             "as_of": as_of,
         }
-        if entity_type == "port":
-            db.add(PortRiskScore(**common))
-            created += 1
-        else:
-            db.add(ChokepointRiskScore(**common))
-            created += 1
+        db.add(PortRiskScore(**common))
+        created += 1
+
     db.commit()
     return created
 

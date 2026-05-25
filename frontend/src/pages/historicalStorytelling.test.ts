@@ -26,6 +26,30 @@ describe('historical storytelling uses real data only', () => {
     expect(source).not.toMatch(/demoStory/)
   })
 
+  it('removes hardcoded AI Story Mode from analysis pages', () => {
+    const dashboard = readPage('Dashboard.tsx')
+    const insightsHub = readPage('InsightsHub.tsx')
+
+    for (const source of [dashboard, insightsHub]) {
+      expect(source).not.toMatch(/STORY_PAIRS/)
+      expect(source).not.toMatch(/storyAnalyze/)
+      expect(source).not.toMatch(/Shanghai × FBX/)
+      expect(source).not.toMatch(/Suez × WCI/)
+      expect(source).not.toMatch(/AI Story Mode/)
+    }
+  })
+
+  it('keeps Global Intelligence labels on PortWatch risk snapshots instead of AIS congestion', () => {
+    const source = readPage('Dashboard.tsx')
+
+    expect(source).toMatch(/PortWatch risk/)
+    expect(source).toMatch(/risk snapshots/)
+    expect(source).not.toMatch(/Port Congestion Intelligence/)
+    expect(source).not.toMatch(/Top Port Congestion/)
+    expect(source).not.toMatch(/High-pressure ports/)
+    expect(source).not.toMatch(/No live AIS telemetry/)
+  })
+
   it('shows Ports detail history gaps without fabricated timeline values', () => {
     const source = readPage('Ports.tsx')
 
@@ -44,31 +68,19 @@ describe('historical storytelling uses real data only', () => {
     const insightRowSource = readFileSync(join(root, '..', 'components', 'InsightRow.tsx'), 'utf8')
 
     expect(source).toMatch(/Exploratory Analysis/)
-    expect(source).toMatch(/Insight Feed/)
-    expect(source).toMatch(/Correlation Heatmap/)
-    expect(source).toMatch(/Forecast Reliability/)
-    expect(source).toMatch(/Relationship Summary/)
-    expect(source).toMatch(/Risk Context/)
+    expect(source).toMatch(/Port Activity Time Series/)
+    expect(source).toMatch(/Port Anomaly Detection Log/)
+    expect(source).toMatch(/Top Ports Comparison/)
+    expect(source).toMatch(/Port Activity Distribution/)
     expect(source).toMatch(/Port Anomaly Severity/)
-    expect(source).toMatch(/Risk Severity/)
     expect(source).toMatch(/Port Severity Mix/)
     expect(source).toMatch(/DeckGL/)
     expect(source).toMatch(/ScatterplotLayer/)
     expect(source).toMatch(/onSelectPort/)
-    expect(source).toMatch(/co-movement, not causation/)
-    expect(source).toMatch(/moving_average_baseline/)
     expect(source).toMatch(/allPortAnomaliesQuery/)
-    expect(source).toMatch(/port_risk/)
-    expect(source).toMatch(/risk_story/)
-    expect(source).toMatch(/data_quality/)
-    expect(insightRowSource).toMatch(/Port Risk/)
+    expect(insightRowSource).toMatch(/Traffic Anomaly/)
     expect(insightRowSource).toMatch(/Risk Story/)
     expect(insightRowSource).toMatch(/Data Quality/)
-    expect(source).toMatch(/riskCoverageQuery/)
-    expect(source).toMatch(/riskStoriesQuery/)
-    expect(source).toMatch(/riskForecastQuery/)
-    expect(source).toMatch(/metricBadgeValue/)
-    expect(source).toMatch(/Relationship summary unavailable/)
     expect(source).not.toMatch(/demoRiskStory/)
   })
 

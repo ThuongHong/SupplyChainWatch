@@ -116,22 +116,20 @@ def _co_occurring_anomalies(db: Session, anomaly: Anomaly) -> list[dict[str, Any
 def _related_metrics(db: Session, anomaly: Anomaly) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     port = db.execute(text("""
-            SELECT AVG(total_in_area)::float AS port_congestion
-            FROM port_congestion
+            SELECT AVG(score)::float AS port_risk
+            FROM port_risk_scores
             WHERE time >= NOW() - INTERVAL '1 day'
             """)).mappings().first()
-    if port and port["port_congestion"] is not None:
-        metrics["average_port_congestion"] = float(port["port_congestion"])
+    if port and port["port_risk"] is not None:
+        metrics["average_portwatch_risk"] = float(port["port_risk"])
 
     chokepoint = db.execute(text("""
-            SELECT AVG(risk_score)::float AS risk_score, AVG(vessel_count)::float AS vessel_count
-            FROM chokepoint_status
+            SELECT AVG(score)::float AS risk_score
+            FROM chokepoint_risk_scores
             WHERE time >= NOW() - INTERVAL '1 day'
             """)).mappings().first()
     if chokepoint and chokepoint["risk_score"] is not None:
         metrics["average_chokepoint_risk_score"] = float(chokepoint["risk_score"])
-    if chokepoint and chokepoint["vessel_count"] is not None:
-        metrics["average_chokepoint_vessel_count"] = float(chokepoint["vessel_count"])
 
     bunker = db.execute(text("""
             SELECT AVG(price_usd_per_ton)::float AS bunker_price

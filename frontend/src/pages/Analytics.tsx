@@ -2,21 +2,12 @@ import React, { useMemo, useEffect, useState, useRef } from 'react'
 import Map, { NavigationControl } from 'react-map-gl/maplibre'
 import DeckGL from '@deck.gl/react'
 import { ScatterplotLayer, TextLayer } from '@deck.gl/layers'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   apiClient,
-  type CorrelationCell,
-  type DataCoverageResponse,
-  type EntityRiskForecastResponse,
-  type ForecastResponse,
-  type InsightResponse,
   type AnomalyResponse,
   type PortResponse,
-  type RiskScoreResponse,
-  type RiskStoryEventResponse,
-  type StoryAnalyzeResponse,
-  type StoryEntity,
 } from '../api/client'
 import { queryKeys } from '../api/queries'
 import { ENABLE_DEMO_FALLBACK } from '../api/config'
@@ -24,15 +15,8 @@ import { PageShell, SectionHeader, SkeletonBlock, ErrorPanel, EmptyState, DataPr
 import { Card } from '../components/Card'
 import { Badge } from '../components/Badge'
 import { Icons } from '../components/icons'
-import { InsightRow, type InsightCategory } from '../components/InsightRow'
 import {
-  forecastLower,
-  forecastPoints,
-  forecastTimestamp,
-  forecastUpper,
-  forecastValue,
   metricValue,
-  relativeTime,
 } from '../api/viewModels'
 
 const REAL_MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
@@ -48,279 +32,6 @@ const portSeverityColor = (severity?: string | null): [number, number, number] =
 const portSeverityCss = (severity?: string | null) => severity === 'high' ? 'var(--danger)' : severity === 'medium' ? 'var(--warning)' : 'var(--accent)'
 const meaningfulPortAnomaly = (anomaly: AnomalyResponse) => anomaly.severity === 'high' || anomaly.severity === 'medium'
 
-type FeedInsight = {
-  title: string
-  text: string
-  category: InsightCategory
-  time: string
-  aiGenerated?: boolean
-  model?: string | null
-  confidence?: number | null
-  attentionLevel?: string | null
-  metrics?: Record<string, unknown> | null
-  sourceMetrics?: Record<string, unknown> | null
-}
-
-const DEMO_INSIGHTS: FeedInsight[] = [
-  { title: 'Demo trend', text: 'BDI trend example is shown only because demo fallback is enabled.', category: 'trend', time: 'demo', aiGenerated: false },
-  { title: 'Demo anomaly', text: 'Port pressure example is shown only because demo fallback is enabled.', category: 'anomaly', time: 'demo', aiGenerated: false },
-]
-
-const normalizeCategory = (category?: string | null): InsightCategory => {
-  if (category === 'anomaly' || category === 'correlation' || category === 'forecast' || category === 'risk_story' || category === 'data_quality' || category === 'port_risk') return category
-  return 'trend'
-}
-
-const insightText = (insight: InsightResponse) => insight.narrative_llm || insight.narrative
-const displayName = (name: string) => name === 'FBX_GLOBAL' ? 'FBX' : name === 'WCI_GLOBAL' ? 'WCI' : name
-const apiName = (label: string) => label === 'FBX' ? 'FBX_GLOBAL' : label === 'WCI' ? 'WCI_GLOBAL' : label
-const riskTone = (severity?: string) => severity === 'high' ? 'danger' : severity === 'medium' ? 'warning' : 'success'
-
-const metricBadgeValue = (value: unknown): string => {
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2)
-  if (typeof value === 'string' || typeof value === 'boolean') return String(value)
-  if (value && typeof value === 'object') return 'structured'
-  return 'n/a'
-}
-
-const numericMetricEntries = (metrics?: Record<string, unknown> | null) => {
-  if (!metrics) return []
-  return Object.entries(metrics)
-    .flatMap(([key, value]) => {
-      if (typeof value === 'number' && Number.isFinite(value)) return [{ key, value }]
-      if (value && typeof value === 'object') {
-        return Object.entries(value as Record<string, unknown>)
-          .filter(([, nested]) => typeof nested === 'number' && Number.isFinite(nested))
-          .map(([nestedKey, nested]) => ({ key: `${key}.${nestedKey}`, value: nested as number }))
-      }
-      return []
-    })
-    .slice(0, 6)
-}
-
-const MiniMetricBars: React.FC<{ metrics?: Record<string, unknown> | null }> = ({ metrics }) => {
-  const entries = numericMetricEntries(metrics)
-  if (entries.length === 0) return null
-  const max = Math.max(...entries.map(item => Math.abs(item.value)), 1)
-  return (
-    <div className="insight-metric-bars" aria-label="Insight source metric chart">
-      {entries.map(item => (
-        <div key={item.key} className="insight-metric-bars__row">
-          <span title={item.key}>{item.key.replace(/_/g, ' ')}</span>
-          <div><i style={{ width: `${Math.max(4, Math.abs(item.value) / max * 100)}%` }} /></div>
-          <b className="mono-num">{metricBadgeValue(item.value)}</b>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-const corrToColor = (v: number | null) => {
-  if (v == null) return 'var(--bg-hover)'
-  const abs = Math.abs(v)
-  if (abs >= 0.85) return v > 0 ? 'rgba(47,179,68,0.62)' : 'rgba(224,82,82,0.62)'
-  if (abs >= 0.65) return v > 0 ? 'rgba(47,179,68,0.38)' : 'rgba(224,82,82,0.38)'
-  if (abs >= 0.4) return 'rgba(74,143,231,0.25)'
-  return 'rgba(74,143,231,0.08)'
-}
-
-const correlationCell = (matrix: CorrelationCell[], row: string, col: string) => {
-  if (row === col) return { correlation: 1, overlap: 0, lag_days: 0 }
-  const a = apiName(row)
-  const b = apiName(col)
-  return matrix.find(c =>
-    (c.index_a === a && c.index_b === b) ||
-    (c.index_a === b && c.index_b === a)
-  )
-}
-
-const CorrelationHeatmap: React.FC<{ data: CorrelationCell[]; labels: string[] }> = ({ data, labels }) => {
-  if (labels.length < 2 || data.length === 0) {
-    return <EmptyState title="No correlation rows" detail="Need at least two live freight index series with overlapping history." compact />
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div className="panel-note" style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-        Pearson correlation over aligned freight-index history. <b style={{ color: 'var(--success)' }}>Green near +1</b> means two series move together, <b style={{ color: 'var(--danger)' }}>red near -1</b> means they move opposite, and pale cells mean weak co-movement. It is relationship evidence, not proof of cause.
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: `44px repeat(${labels.length}, 1fr)`, gap: 3, alignItems: 'center' }}>
-        <div />
-        {labels.map(label => <div key={label} style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', textAlign: 'center' }}>{label}</div>)}
-        {labels.map(row => (
-          <React.Fragment key={row}>
-            <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', textAlign: 'right', paddingRight: 6 }}>{row}</div>
-            {labels.map(col => {
-              const cell = correlationCell(data, row, col)
-              const value = cell?.correlation ?? null
-              return (
-                <div key={`${row}-${col}`} title={`${row} vs ${col}: ${value == null ? 'no overlap' : value.toFixed(2)} · overlap ${cell?.overlap ?? 0} days · lag ${cell?.lag_days ?? 0} days · co-movement, not causation`} style={{
-                  aspectRatio: '1',
-                  borderRadius: 4,
-                  background: row === col ? 'var(--bg-hover)' : corrToColor(value),
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  border: '1px solid var(--border-subtle)',
-                }}>
-                  <span className="mono-num" style={{ fontSize: 12, fontWeight: 500, color: value == null ? 'var(--text-muted)' : 'var(--text-primary)' }}>
-                    {value == null ? 'n/a' : value.toFixed(2)}
-                  </span>
-                </div>
-              )
-            })}
-          </React.Fragment>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
-        <span><b className="mono-num" style={{ color: 'var(--text-primary)' }}>+0.70 to +1.00</b> strong same direction</span>
-        <span><b className="mono-num" style={{ color: 'var(--text-primary)' }}>-0.70 to -1.00</b> strong opposite direction</span>
-        <span><b className="mono-num" style={{ color: 'var(--text-primary)' }}>0.00</b> little linear relationship</span>
-      </div>
-    </div>
-  )
-}
-
-const ForecastCard: React.FC<{ name: string; forecast?: ForecastResponse; isLoading: boolean; error: unknown }> = ({ name, forecast, isLoading, error }) => {
-  const points = forecastPoints(forecast).slice(0, forecast?.horizon_days ?? 14)
-  const usable = points.map(point => ({ point, value: forecastValue(point), lower: forecastLower(point), upper: forecastUpper(point) })).filter(item => item.value != null)
-  const mape = metricValue(forecast?.metrics, 'mape') ?? metricValue(forecast?.metrics, 'MAPE')
-  const mae = metricValue(forecast?.metrics, 'mae') ?? metricValue(forecast?.metrics, 'MAE')
-  const rmse = metricValue(forecast?.metrics, 'rmse') ?? metricValue(forecast?.metrics, 'RMSE')
-
-  return (
-    <Card style={{ padding: 14 }}>
-      <SectionHeader
-        title={`${displayName(name)} Forecast`}
-        sub={forecast ? `${forecast.model_name ?? 'moving_average_baseline'} · ${forecast.horizon_days} days · ${relativeTime(forecast.created_at)}` : 'No forecast row returned'}
-        action={mape == null ? <Badge variant="default">MAPE n/a</Badge> : <Badge variant={mape <= 15 ? 'success' : mape <= 30 ? 'warning' : 'danger'}>MAPE {mape.toFixed(1)}%</Badge>}
-      />
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-        <Badge variant="default">{forecast?.model_name ?? 'moving_average_baseline'}</Badge>
-        {mae != null && <Badge variant="default">MAE {mae.toFixed(1)}</Badge>}
-        {rmse != null && <Badge variant="default">RMSE {rmse.toFixed(1)}</Badge>}
-      </div>
-      {isLoading && <SkeletonBlock height={90} lines={3} />}
-      {!isLoading && Boolean(error) && <EmptyState title="No forecast yet" detail={error instanceof Error ? error.message : 'Backend returned no latest forecast.'} compact />}
-      {!isLoading && !error && usable.length > 0 && (
-        <svg width="100%" viewBox="0 0 260 88" style={{ display: 'block' }} role="img" aria-label={`${displayName(name)} forecast chart`}>
-          {(() => {
-            const vals = usable.flatMap(item => [item.value, item.lower, item.upper]).filter((v): v is number => typeof v === 'number')
-            const min = Math.min(...vals), max = Math.max(...vals), range = max - min || 1
-            const toX = (i: number) => 28 + (i / Math.max(usable.length - 1, 1)) * 218
-            const toY = (v: number) => 8 + (1 - (v - min) / range) * 58
-            const line = usable.map((item, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(item.value ?? 0).toFixed(1)}`).join(' ')
-            const bandPoints = usable.filter(item => item.lower != null && item.upper != null)
-            const band = bandPoints.length > 1
-              ? 'M' + bandPoints.map((item, i) => `${toX(i).toFixed(1)},${toY(item.upper ?? 0).toFixed(1)}`).join(' L') +
-              ' L' + bandPoints.slice().reverse().map((item, i) => `${toX(bandPoints.length - 1 - i).toFixed(1)},${toY(item.lower ?? 0).toFixed(1)}`).join(' L') + ' Z'
-              : ''
-            return (
-              <>
-                <line x1="28" y1="66" x2="246" y2="66" stroke="var(--border-subtle)" />
-                {band && <path d={band} fill="var(--accent)" opacity="0.12" />}
-                <path d={line} fill="none" stroke="var(--accent)" strokeWidth="1.7" strokeDasharray="4,3" />
-                <text x="28" y="84" style={{ fontSize: 9, fill: 'var(--text-muted)' }}>{forecastTimestamp(usable[0].point)?.slice(5, 10) ?? 'start'}</text>
-                <text x="226" y="84" style={{ fontSize: 9, fill: 'var(--text-muted)' }}>{forecastTimestamp(usable[usable.length - 1].point)?.slice(5, 10) ?? 'end'}</text>
-              </>
-            )
-          })()}
-        </svg>
-      )}
-    </Card>
-  )
-}
-
-const STORY_PAIRS: { label: string; entityA: StoryEntity; entityB: StoryEntity }[] = [
-  { label: 'BDI × FBX', entityA: { type: 'index', id: 'BDI' }, entityB: { type: 'index', id: 'FBX_GLOBAL' } },
-  { label: 'Shanghai × FBX', entityA: { type: 'port', id: 'Shanghai' }, entityB: { type: 'index', id: 'FBX_GLOBAL' } },
-  { label: 'Suez × WCI', entityA: { type: 'chokepoint', id: 'suez_canal' }, entityB: { type: 'index', id: 'WCI_GLOBAL' } },
-]
-
-const RelationshipSummary: React.FC = () => {
-  const [selected, setSelected] = useState(0)
-  const pair = STORY_PAIRS[selected]
-  const storyQuery = useQuery<StoryAnalyzeResponse>({
-    queryKey: queryKeys.story(pair.label),
-    queryFn: ({ signal }) => apiClient.storyAnalyze({ entity_a: pair.entityA, entity_b: pair.entityB, period_days: 90 }, { signal }),
-    retry: false,
-  })
-
-  return (
-    <div>
-      <div className="tab-strip">
-        {STORY_PAIRS.map((item, i) => (
-          <button key={item.label} className={selected === i ? 'tab-button tab-button--active' : 'tab-button'} onClick={() => setSelected(i)}>{item.label}</button>
-        ))}
-      </div>
-      {storyQuery.isLoading && <SkeletonBlock height={110} />}
-      {storyQuery.error && <ErrorPanel error={storyQuery.error} title="Relationship summary unavailable" compact />}
-      {storyQuery.data && (
-        <div className="panel-note" style={{ fontSize: 13, lineHeight: 1.65 }}>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-            <Badge variant="accent">{pair.entityA.id}</Badge>
-            <Badge variant="info">{pair.entityB.id}</Badge>
-            <Badge variant="default">90-day relationship window</Badge>
-            <Badge variant="default">correlation + lag scan</Badge>
-          </div>
-          <div className="method-strip" style={{ marginBottom: 10 }}>
-            <span>Evidence first: backend aligns daily series, computes Pearson correlation, detrended correlation, optimal lag, coincident events, and divergences before writing narrative.</span>
-          </div>
-          <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>{storyQuery.data.headline}</div>
-          {storyQuery.data.key_findings.length > 0 && (
-            <div style={{ display: 'grid', gap: 5, marginBottom: 10 }}>
-              {storyQuery.data.key_findings.slice(0, 3).map(finding => (
-                <div key={finding} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>- {finding}</div>
-              ))}
-            </div>
-          )}
-          <div style={{ whiteSpace: 'pre-line', color: 'var(--text-secondary)' }}>{storyQuery.data.narrative}</div>
-          {storyQuery.data.caveats.length > 0 && (
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Caveats</div>
-              {storyQuery.data.caveats.map(caveat => <div key={caveat} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{caveat}</div>)}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const RiskContext: React.FC<{
-  entity?: RiskScoreResponse
-  stories: RiskStoryEventResponse[]
-  coverage: DataCoverageResponse[]
-  forecast?: EntityRiskForecastResponse
-  loading: boolean
-}> = ({ entity, stories, coverage, forecast, loading }) => {
-  const gapDays = coverage.reduce((sum, row) => sum + row.missing_days, 0)
-  if (loading) return <SkeletonBlock height={160} lines={4} />
-  if (!entity) return <EmptyState title="No ranked risk entity" detail="Run PortWatch collection and risk scoring to populate contextual interpretation." compact />
-  return (
-    <div className="panel-note">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{entity.entity_name}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{entity.entity_type} · Risk Severity from 0-100 composite score · coverage gaps {gapDays} days</div>
-        </div>
-        <Badge variant={riskTone(entity.severity)}>Risk Severity {entity.severity} · {Math.round(entity.score)}/100</Badge>
-      </div>
-      {stories.slice(0, 2).map(story => (
-        <div key={story.event_key} style={{ padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
-          <Badge variant={riskTone(story.severity)}>Risk Severity {story.severity} · {story.attention_level}</Badge>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55, marginTop: 5 }}>{story.narrative}</div>
-        </div>
-      ))}
-      {stories.length === 0 && <EmptyState title="No risk story events" detail="Detector needs enough feature snapshots and threshold movement." compact />}
-      <div style={{ marginTop: 10 }}>
-        <Badge variant={forecast?.data_sufficiency_status === 'sufficient' ? 'success' : 'warning'}>
-          Forecast {forecast?.data_sufficiency_status ?? 'unknown'}
-        </Badge>
-        {forecast?.unavailable_reason && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>{forecast.unavailable_reason}</span>}
-      </div>
-    </div>
-  )
-}
 
 type MapPort = PortResponse & {
   severity: PortSeverity
@@ -468,46 +179,11 @@ export const Analytics: React.FC = () => {
     queryKey: queryKeys.anomalies(days, undefined, undefined, 500),
     queryFn: ({ signal }) => apiClient.anomalies({ days, limit: 500 }, { signal }),
   })
-  const insightsQuery = useQuery({
-    queryKey: queryKeys.insights(12),
-    queryFn: ({ signal }) => apiClient.latestInsights(12, { signal }),
-  })
-  const indicesQuery = useQuery({
-    queryKey: queryKeys.indices,
-    queryFn: ({ signal }) => apiClient.indices({ signal }),
-  })
-  const supportedNames = useMemo(() => {
-    const available = new Set((indicesQuery.data ?? []).map(row => row.index_name))
-    const preferred = ['BDI', 'FBX_GLOBAL', 'WCI_GLOBAL'].filter(name => available.has(name))
-    return preferred.length >= 2 ? preferred : Array.from(available).slice(0, 4)
-  }, [indicesQuery.data])
-  const correlationNames = supportedNames.join(',')
-  const correlationsQuery = useQuery({
-    queryKey: queryKeys.correlations(correlationNames || 'none', 180),
-    queryFn: ({ signal }) => apiClient.correlations(correlationNames, 180, { signal }),
-    enabled: supportedNames.length >= 2,
-  })
-  const forecastQueries = useQueries({
-    queries: supportedNames.slice(0, 3).map(name => ({
-      queryKey: queryKeys.indexForecast(name),
-      queryFn: ({ signal }: { signal: AbortSignal }) => apiClient.indexForecast(name, { signal }),
-      retry: false,
-    })),
-  })
-  const portRiskQuery = useQuery({
-    queryKey: queryKeys.globalPortRisk(8),
-    queryFn: ({ signal }) => apiClient.globalPortRisk(8, { signal }),
-  })
-  const chokepointRiskQuery = useQuery({
-    queryKey: queryKeys.chokepointStress(8),
-    queryFn: ({ signal }) => apiClient.chokepointStress(8, { signal }),
-  })
-
   // selectedPortId starts null → activityQuery is disabled (isLoading=false but no data yet)
   // So we also treat "portId not set yet" or "activity currently fetching" as loading
   const activityLoading = selectedPortId === null || activityQuery.isLoading || activityQuery.isFetching
   const loading = portsQuery.isLoading || activityLoading || comparisonQuery.isLoading || anomaliesQuery.isLoading
-  const error = portsQuery.error ?? activityQuery.error ?? comparisonQuery.error ?? anomaliesQuery.error ?? allPortAnomaliesQuery.error ?? insightsQuery.error ?? indicesQuery.error ?? correlationsQuery.error ?? portRiskQuery.error ?? chokepointRiskQuery.error
+  const error = portsQuery.error ?? activityQuery.error ?? comparisonQuery.error ?? anomaliesQuery.error ?? allPortAnomaliesQuery.error
 
   const mapPorts = useMemo(() => {
     return (portsQuery.data ?? []).filter(p => p.lat !== null && p.lon !== null)
@@ -515,43 +191,6 @@ export const Analytics: React.FC = () => {
   const selectedPort = useMemo(() => {
     return (portsQuery.data ?? []).find(port => port.id === selectedPortId) ?? null
   }, [portsQuery.data, selectedPortId])
-  const liveFeed = useMemo<FeedInsight[]>(() => (insightsQuery.data ?? []).map((insight: InsightResponse) => ({
-    title: insight.title,
-    text: insightText(insight),
-    category: normalizeCategory(insight.category),
-    time: relativeTime(insight.narrative_generated_at || insight.generated_at),
-    aiGenerated: Boolean(insight.narrative_llm),
-    model: insight.narrative_model,
-    confidence: insight.confidence,
-    attentionLevel: insight.attention_level,
-    metrics: insight.metrics,
-    sourceMetrics: insight.source_metrics,
-  })), [insightsQuery.data])
-  const usingDemoFeed = ENABLE_DEMO_FALLBACK && !insightsQuery.isLoading && liveFeed.length === 0
-  const feed = usingDemoFeed ? DEMO_INSIGHTS : liveFeed
-  const riskEntities = useMemo(() => [
-    ...(portRiskQuery.data ?? []),
-    ...(chokepointRiskQuery.data ?? []),
-  ].sort((a, b) => b.score - a.score), [portRiskQuery.data, chokepointRiskQuery.data])
-  const topRiskEntity = riskEntities[0]
-  const riskCoverageQuery = useQuery({
-    queryKey: queryKeys.riskCoverage(topRiskEntity?.entity_id),
-    queryFn: ({ signal }) => apiClient.riskCoverage(topRiskEntity?.entity_id, { signal }),
-    enabled: Boolean(topRiskEntity?.entity_id),
-  })
-  const riskStoriesQuery = useQuery({
-    queryKey: queryKeys.riskStories(topRiskEntity?.entity_id, 180, 4),
-    queryFn: ({ signal }) => apiClient.riskStories({ entity_id: topRiskEntity?.entity_id, days: 180, limit: 4 }, { signal }),
-    enabled: Boolean(topRiskEntity?.entity_id),
-  })
-  const riskForecastQuery = useQuery({
-    queryKey: topRiskEntity?.entity_id ? queryKeys.riskEntityForecast(topRiskEntity.entity_id) : ['risk', 'forecast', 'no-entity'],
-    queryFn: ({ signal }) => apiClient.riskEntityForecast(topRiskEntity!.entity_id, { signal }),
-    enabled: Boolean(topRiskEntity?.entity_id),
-    retry: false,
-  })
-  const labels = supportedNames.map(displayName)
-  const forecastCount = forecastQueries.filter(query => query.data).length
   const portAnomalies = useMemo(() => {
     return (anomaliesQuery.data ?? []).filter((anomaly: AnomalyResponse) =>
       anomaly.port_id != null || anomaly.entity_type === 'port'
@@ -599,28 +238,6 @@ export const Analytics: React.FC = () => {
       }
     })
   }, [allPortAnomalies, mapPorts, selectedPortId])
-  const proofCards = [
-    {
-      label: 'Narratives',
-      value: usingDemoFeed ? 'Demo' : String(liveFeed.length),
-      detail: usingDemoFeed ? 'explicit fallback enabled' : 'live interpretation rows',
-    },
-    {
-      label: 'Correlation',
-      value: String(correlationsQuery.data?.length ?? 0),
-      detail: labels.length ? `${labels.length} aligned index series` : 'waiting for overlap',
-    },
-    {
-      label: 'Anomalies',
-      value: String(activePortAnomalies.length),
-      detail: `${days}-day PortWatch window${selectedPort ? ` · ${selectedPort.name}` : ''}`,
-    },
-    {
-      label: 'Forecasts',
-      value: String(forecastCount),
-      detail: forecastCount ? 'backend forecasts with uncertainty' : 'forecast rows unavailable',
-    },
-  ]
 
   const isActivityDataValid = (data: any[] | undefined) => {
     return data && Array.isArray(data) && data.length >= 2
@@ -980,25 +597,6 @@ export const Analytics: React.FC = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {error && <ErrorPanel error={error} title="Data unavailable" compact />}
 
-        <div className="evidence-strip">
-          {proofCards.map(card => (
-            <div className="evidence-card" key={card.label}>
-              <div className="evidence-card__label">{card.label}</div>
-              <div className="evidence-card__value">{card.value}</div>
-              <div className="evidence-card__detail">{card.detail}</div>
-            </div>
-          ))}
-        </div>
-
-        <Card style={{ padding: 14 }}>
-          <SectionHeader title="How to read this page" sub="EDA evidence labels prevent mixing statistical anomalies with composite risk." />
-          <div className="method-strip">
-            <span><b>Port anomaly</b> = selected port metric z-score against a rolling PortWatch baseline.</span>
-            <span><b>Risk Severity</b> = 0-100 composite risk score from traffic, trade, bottleneck, and freshness signals.</span>
-            <span><b>Correlation</b> = freight-index co-movement, not causation.</span>
-            <span><b>Forecast</b> = moving_average_baseline, not a strong predictive claim.</span>
-          </div>
-        </Card>
 
         {/* Global Controls */}
         <Card style={{ padding: 16 }}>
@@ -1102,67 +700,6 @@ export const Analytics: React.FC = () => {
           </div>
         </div>
 
-        <div className="responsive-grid grid-main-side">
-          <Card style={{ padding: 16, minWidth: 0 }}>
-            <SectionHeader
-              title="Insight Feed"
-              sub="Narratives from /api/insights/latest, generated by backend analysis jobs from source metrics."
-              action={<DataProvenance mode={usingDemoFeed ? 'demo' : insightsQuery.isLoading ? 'loading' : liveFeed.length ? 'live' : 'empty'} source={usingDemoFeed ? 'Explicit demo fallback enabled' : '/api/insights/latest'} />}
-            />
-            <div className="panel-note" style={{ marginBottom: 10, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-              Each row comes from the backend insight table. The text is either the stored narrative or LLM narrative when the backend returned one; badges show model, confidence, and attention level when present. Mini bars visualize numeric metrics and source metrics attached to that insight.
-            </div>
-            {insightsQuery.isLoading && <SkeletonBlock height={170} lines={5} />}
-            {!insightsQuery.isLoading && feed.slice(0, 5).map((insight, i) => (
-              <div key={`${insight.title}-${i}`} className="insight-feed-row">
-                <InsightRow text={insight.text} category={insight.category} time={insight.time} aiGenerated={insight.aiGenerated ?? false} />
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '-8px 0 10px 40px' }}>
-                  <Badge variant="default">{insight.title}</Badge>
-                  {insight.model && <Badge variant="info">{insight.model}</Badge>}
-                  {insight.attentionLevel && <Badge variant={insight.attentionLevel === 'urgent' ? 'danger' : insight.attentionLevel === 'watch' ? 'warning' : 'default'}>{insight.attentionLevel}</Badge>}
-                  {typeof insight.confidence === 'number' && <Badge variant="default">{Math.round(insight.confidence * 100)}% confidence</Badge>}
-                </div>
-                <MiniMetricBars metrics={insight.sourceMetrics ?? insight.metrics} />
-              </div>
-            ))}
-            {!insightsQuery.isLoading && feed.length === 0 && (
-              <EmptyState title="No live insight rows" detail="Run analysis jobs to generate interpretation rows from current data." compact />
-            )}
-          </Card>
-
-          <Card style={{ padding: 16, minWidth: 0 }}>
-            <SectionHeader title="Correlation Heatmap" sub={labels.length ? labels.join(' · ') : 'Waiting for index overlap'} />
-            {correlationsQuery.isLoading ? <SkeletonBlock height={140} /> : <CorrelationHeatmap data={correlationsQuery.data ?? []} labels={labels} />}
-          </Card>
-        </div>
-
-        <div className="responsive-grid grid-two">
-          <Card style={{ padding: 16 }}>
-            <SectionHeader title="Forecast Reliability" sub="Backend forecasts with MAPE and uncertainty bands when available." />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-              {supportedNames.slice(0, 3).map((name, i) => (
-                <ForecastCard key={name} name={name} forecast={forecastQueries[i]?.data} isLoading={forecastQueries[i]?.isLoading ?? false} error={forecastQueries[i]?.error} />
-              ))}
-              {supportedNames.length === 0 && <EmptyState title="No forecast candidates" detail="The indices endpoint did not return BDI, FBX, WCI, or alternate series." compact />}
-            </div>
-          </Card>
-
-          <Card style={{ padding: 16 }}>
-            <SectionHeader title="Relationship Summary" sub="Entity-pair interpretation with caveats retained." />
-            <RelationshipSummary />
-          </Card>
-        </div>
-
-        <Card style={{ padding: 16 }}>
-          <SectionHeader title="Risk Context" sub="Risk Severity is separate from Port Anomaly Severity: this is composite operational risk, not z-score anomaly severity." />
-          <RiskContext
-            entity={topRiskEntity}
-            stories={riskStoriesQuery.data ?? []}
-            coverage={riskCoverageQuery.data ?? []}
-            forecast={riskForecastQuery.data}
-            loading={portRiskQuery.isLoading || chokepointRiskQuery.isLoading || riskCoverageQuery.isLoading || riskStoriesQuery.isLoading || riskForecastQuery.isLoading}
-          />
-        </Card>
 
         {/* Charts: Activity & Anomalies */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: 16 }}>

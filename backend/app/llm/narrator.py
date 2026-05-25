@@ -138,13 +138,13 @@ def _related_signals(db: Session) -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
     result = db.execute(text("""
             WITH latest AS (
-                SELECT AVG(total_in_area)::float AS value
-                FROM port_congestion
+                SELECT AVG(score)::float AS value
+                FROM port_risk_scores
                 WHERE time >= NOW() - INTERVAL '1 day'
             ),
             previous AS (
-                SELECT AVG(total_in_area)::float AS value
-                FROM port_congestion
+                SELECT AVG(score)::float AS value
+                FROM port_risk_scores
                 WHERE time >= NOW() - INTERVAL '8 days'
                   AND time < NOW() - INTERVAL '7 days'
             )
@@ -154,7 +154,7 @@ def _related_signals(db: Session) -> list[dict[str, Any]]:
     if result and result["value"] is not None:
         signals.append(
             {
-                "signal_name": "average_port_congestion",
+                "signal_name": "average_portwatch_risk",
                 "value": float(result["value"]),
                 "change": _float_or_none(result["change"]),
             }

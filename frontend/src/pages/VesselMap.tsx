@@ -17,6 +17,7 @@ import {
   type VesselWatchlistResponse,
 } from '../api/client'
 import { queryKeys } from '../api/queries'
+import { latestPortAnomalyById } from '../api/viewModels'
 import { EmptyState, ErrorPanel } from '../components/DataState'
 
 // ---- Vessel types ----
@@ -282,15 +283,14 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
   });
 
   const ports = useMemo(() => {
-    if (!portsQuery.data || !congestionQuery.data) return [];
+    if (!portsQuery.data) return [];
+    const latestAnomalyByPort = latestPortAnomalyById(anomalies)
     return portsQuery.data.map(port => {
-      const congestion = congestionQuery.data.find(c => c.port_id === port.id);
-      const portAnomalies = anomalies.filter(
-        a => a.port_name?.toLowerCase() === port.name?.toLowerCase() ||
-          (a.port_id && a.port_id === port.id)
-      );
-      const activeAnomaly = portAnomalies.find(a => a.severity === 'high' || a.severity === 'medium');
-      const level = activeAnomaly ? (activeAnomaly.severity as 'high' | 'medium') : 'low';
+      const congestion = congestionQuery.data?.find(c => c.port_id === port.id);
+      const latestAnomaly = latestAnomalyByPort.get(port.id);
+      const level = latestAnomaly?.severity === 'high' || latestAnomaly?.severity === 'medium'
+        ? latestAnomaly.severity
+        : 'low';
 
       let color: [number, number, number] = [34, 197, 94]; // Green
       if (level === 'high') color = [239, 68, 68]; // Red
@@ -300,10 +300,35 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
         ...port,
         congestion,
         color,
-        hasAnomaly: !!activeAnomaly
+        hasAnomaly: level !== 'low'
       };
     });
   }, [portsQuery.data, congestionQuery.data, anomalies]);
+
+  // Build mmsi → anomaly RGB colour for vessel dot highlighting.
+  // Each vessel inherits the colour of the nearest port with an active anomaly
+  // (within ~1 degree ≈ 111 km). Vessels not near any flagged port keep their
+  // vessel-type colour. Port colours are already computed in the `ports` useMemo.
+  const vesselAnomalyColorByMmsi = useMemo((): Map<number, [number, number, number]> => {
+    const map = new globalThis.Map() as globalThis.Map<number, [number, number, number]>
+    const flaggedPorts = ports.filter(p => p.hasAnomaly)
+    if (!flaggedPorts.length) return map
+    vessels.forEach(v => {
+      let bestDist = Infinity
+      let bestColor: [number, number, number] | null = null
+      flaggedPorts.forEach(p => {
+        const dLat = (p.lat ?? 0) - v.lat
+        const dLon = (p.lon ?? 0) - v.lon
+        const dist = dLat * dLat + dLon * dLon
+        if (dist < 1.0 && dist < bestDist) { // 1° ≈ 111 km bounding box
+          bestDist = dist
+          bestColor = p.color as [number, number, number]
+        }
+      })
+      if (bestColor) map.set(v.id, bestColor)
+    })
+    return map
+  }, [vessels, ports])
 
   const deckLayers = [
     layers.heatmap && new HeatmapLayer({
@@ -336,7 +361,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
       getAlignmentBaseline: 'center',
       getTextAnchor: 'middle',
       pickable: true,
-      onClick: ({object}: any) => object && onSelect(object.id),
+      onClick: ({ object }: any) => object && onSelect(object.id),
     }),
 
     layers.ports && new TextLayer({
@@ -357,10 +382,13 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
       id: 'vessels',
       data: vessels,
       getPosition: (d: any) => [d.lon, d.lat],
-      getFillColor: (d: any) => VESSEL_TYPE_INFO[d.type as VesselTypeId].colorRgb,
-      getRadius: 4,
+      // Colour vessels by proximity-based anomaly: vessels near a port with an
+      // active PortWatch anomaly inherit the port's anomaly colour (red/amber).
+      // All other vessels keep their vessel-type colour.
+      getFillColor: (d: any) => vesselAnomalyColorByMmsi.get(d.id) ?? VESSEL_TYPE_INFO[d.type as VesselTypeId].colorRgb,
+      getRadius: (d: any) => vesselAnomalyColorByMmsi.has(d.id) ? 5 : 4,
       radiusMinPixels: 3,
-      radiusMaxPixels: 8,
+      radiusMaxPixels: 9,
       pickable: true,
       onClick: ({ object }: any) => object && onSelect(object.id),
     }),

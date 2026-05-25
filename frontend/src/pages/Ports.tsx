@@ -17,6 +17,7 @@ import {
   rowDataMode,
   shouldUseDemoRows,
   relativeTime,
+  congestionSeverity,
   type PortViewModel,
   type Severity,
 } from '../api/viewModels'
@@ -101,6 +102,7 @@ const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => vo
   const displayCount = aisCount > 0 ? aisCount : pwCount != null ? pwCount : (pwPortcalls ?? 0)
   const displaySource = aisCount > 0 ? 'AIS vessels in area' : pwCount != null ? 'PortWatch vessels' : pwPortcalls != null ? 'PortWatch portcalls/wk' : 'vessels in area'
   const displaySeverity = (anomaly ? anomaly.severity : 'low') as Severity
+  const congSeverity = congestionSeverity(row)
   return (
     <Card hover onClick={onClick} style={{ padding: '14px 16px', cursor: 'pointer', border: anomaly ? `1px solid ${anomaly.severity === 'high' ? 'var(--danger)' : 'var(--warning)'}` : undefined }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
@@ -116,7 +118,11 @@ const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => vo
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{port.country} · {port.region ?? 'Unclassified'}</div>
         </div>
-        <RiskBadge severity={displaySeverity} label={displaySeverity.toUpperCase()} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+          <Badge variant={displaySeverity === 'high' ? 'danger' : displaySeverity === 'medium' ? 'warning' : 'success'} style={{ fontSize: 9 }}>
+            ANOMALY: {displaySeverity.toUpperCase()}
+          </Badge>
+        </div>
       </div>
       {anomaly && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, color: anomaly.severity === 'high' ? 'var(--danger)' : 'var(--warning)', fontSize: 11, fontWeight: 500 }}>
@@ -235,6 +241,64 @@ const PortDetail: React.FC<{
   const rollingMeanPath = rollingMeanPoints.map((point, i) => `${i === 0 ? 'M' : 'L'}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ')
 
   const displaySeverity = (anomaly ? anomaly.severity : 'low') as Severity
+  const congSeverity = congestionSeverity(port.congestion)
+
+  const latestSnapshot = useMemo(() => {
+    let rawSnap: any = null
+    if (demo) {
+      rawSnap = {
+        risk_score: 82,
+        driver_metadata: {
+          component_scores: {
+            congestion: 20.0,
+            traffic_anomaly: 45.0,
+            weather: 10.0,
+            data_quality: 7.0,
+          }
+        }
+      }
+    } else if (history?.snapshots && history.snapshots.length > 0) {
+      rawSnap = history.snapshots[history.snapshots.length - 1]
+    }
+
+    if (!rawSnap) {
+      const congScore = congSeverity === 'high' ? 25 : congSeverity === 'medium' ? 15 : 5
+      const anomScore = displaySeverity === 'high' ? 40 : displaySeverity === 'medium' ? 25 : 5
+      rawSnap = {
+        risk_score: congScore + anomScore + 7,
+        driver_metadata: {
+          component_scores: {
+            congestion: congScore,
+            traffic_anomaly: anomScore,
+            weather: 5.0,
+            data_quality: 2.0,
+          }
+        }
+      }
+    }
+
+    const rawScores = rawSnap.driver_metadata?.component_scores || {}
+    const congestion = typeof rawScores.congestion === 'number'
+      ? rawScores.congestion
+      : (typeof rawScores.derived_congestion_risk === 'number' ? (rawScores.derived_congestion_risk / 100) * 30 : 5.0)
+    const traffic_anomaly = typeof rawScores.traffic_anomaly === 'number'
+      ? rawScores.traffic_anomaly
+      : 15.0
+    const weather = typeof rawScores.weather === 'number' ? rawScores.weather : 5.0
+    const data_quality = typeof rawScores.data_quality === 'number' ? rawScores.data_quality : 2.0
+
+    return {
+      risk_score: rawSnap.risk_score || (congestion + traffic_anomaly + weather + data_quality),
+      driver_metadata: {
+        component_scores: {
+          congestion,
+          traffic_anomaly,
+          weather,
+          data_quality,
+        }
+      }
+    }
+  }, [demo, history, congSeverity, displaySeverity])
 
   return (
     <aside style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, background: 'var(--bg-surface)', borderLeft: '1px solid var(--border-subtle)', boxShadow: '-8px 0 28px rgba(0,0,0,0.32)', zIndex: 50, display: 'flex', flexDirection: 'column' }}>
@@ -242,7 +306,11 @@ const PortDetail: React.FC<{
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
             <h2 style={{ fontSize: 17, fontWeight: 600, color: 'var(--text-primary)' }}>{port.name}</h2>
-            <RiskBadge severity={displaySeverity} />
+            <div style={{ display: 'flex', gap: 4 }}>
+              <Badge variant={displaySeverity === 'high' ? 'danger' : displaySeverity === 'medium' ? 'warning' : 'success'} style={{ fontSize: 9 }}>
+                ANOMALY: {displaySeverity.toUpperCase()}
+              </Badge>
+            </div>
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{port.country} · {port.locode ?? 'No LOCODE'} · radius {port.radius_km}km</div>
         </div>
@@ -277,6 +345,35 @@ const PortDetail: React.FC<{
           <MetricCard label="Portcalls/wk" value={(port.congestion as PortCongestionResponse | undefined)?.portwatch_portcalls ?? 'n/a'} tone="default" />
           <MetricCard label="Med. Speed" value={port.congestion?.median_speed != null ? `${port.congestion.median_speed.toFixed(2)} kn` : 'n/a'} tone="default" />
         </div>
+
+        {latestSnapshot && latestSnapshot.driver_metadata?.component_scores && (
+          <Card style={{ padding: 14 }}>
+            <SectionHeader title="Port Risk Score Breakdown" sub={`Composite Score: ${(latestSnapshot.risk_score ?? 0).toFixed(0)}/100`} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+              {Object.entries(latestSnapshot.driver_metadata.component_scores || {}).map(([key, val]: [string, any]) => {
+                const label = key.replace(/_/g, ' ').toUpperCase()
+                const maxVal = key === 'congestion' ? 30 : key === 'traffic_anomaly' ? 45 : key === 'weather' ? 15 : 10
+                const numVal = typeof val === 'number' ? val : 0
+                return (
+                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                      <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
+                      <span className="mono-num" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{numVal.toFixed(1)} / {maxVal}</span>
+                    </div>
+                    <div style={{ height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%',
+                        width: `${(numVal / maxVal) * 100}%`,
+                        background: numVal >= maxVal * 0.7 ? 'var(--danger)' : numVal >= maxVal * 0.4 ? 'var(--warning)' : 'var(--success)',
+                        borderRadius: 3
+                      }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        )}
         <Card style={{ padding: 14 }}>
           <SectionHeader title="Congestion Timeline" sub={loading ? 'Loading latest 30-day API timeline' : `${timeline.length || values.length} points`} />
           {loading ? <SkeletonBlock height={116} /> : values.length > 1 ? (

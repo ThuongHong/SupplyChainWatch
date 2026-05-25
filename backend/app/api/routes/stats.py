@@ -33,10 +33,16 @@ async def overview_stats(
     }
 
     active_result = await db.execute(text("""
-            WITH latest AS (SELECT MAX(time) AS snapshot_time FROM vessel_positions)
             SELECT COUNT(*)::int AS active_vessels
-            FROM vessel_positions vp
-            JOIN latest ON latest.snapshot_time = vp.time
+            FROM (
+                SELECT DISTINCT entity_id
+                FROM port_risk_scores
+                WHERE time >= NOW() - INTERVAL '7 days'
+                UNION
+                SELECT DISTINCT entity_id
+                FROM chokepoint_risk_scores
+                WHERE time >= NOW() - INTERVAL '7 days'
+            ) monitored_entities
             """))
     anomaly_result = await db.execute(text("""
             SELECT COUNT(*)::int AS high_count

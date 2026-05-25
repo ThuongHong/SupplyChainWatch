@@ -108,7 +108,7 @@ export const DataProvenance: React.FC<{
 
 export const RiskBadge: React.FC<{ severity: Severity; label?: string }> = ({ severity, label }) => {
   const variant = severity === 'high' ? 'danger' : severity === 'medium' ? 'warning' : 'success'
-  return <Badge variant={variant}>{label ?? `${severity[0].toUpperCase()}${severity.slice(1)} risk`}</Badge>
+  return <Badge variant={variant}>{label ?? `${severity[0].toUpperCase()}${severity.slice(1)} Anomaly`}</Badge>
 }
 
 export const MetricCard: React.FC<{

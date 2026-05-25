@@ -100,17 +100,35 @@ export interface PortViewModel extends PortResponse {
   stale: boolean
 }
 
+function anomalyTimestamp(anomaly: Pick<AnomalyResponse, 'time' | 'detected_at'>): number {
+  return new Date(anomaly.time ?? anomaly.detected_at).getTime()
+}
+
+export function latestPortAnomalyById<T extends Pick<AnomalyResponse, 'port_id' | 'time' | 'detected_at'>>(
+  anomalies: T[],
+): Map<number, T> {
+  const byPort = new Map<number, T>()
+  anomalies.forEach(anomaly => {
+    if (anomaly.port_id == null) return
+    const current = byPort.get(anomaly.port_id)
+    if (!current || anomalyTimestamp(anomaly) > anomalyTimestamp(current)) {
+      byPort.set(anomaly.port_id, anomaly)
+    }
+  })
+  return byPort
+}
+
 export function buildPortViewModels(
   ports: PortResponse[],
   congestion: PortCongestionResponse[],
-  anomalies?: any[],
+  anomalies?: AnomalyResponse[],
 ): PortViewModel[] {
   const byPort = new Map(congestion.map(row => [row.port_id, row]))
-  const byAnomaly = new Map((anomalies ?? []).map(a => [a.port_id, a]))
+  const byAnomaly = latestPortAnomalyById(anomalies ?? [])
   return ports.map(port => {
     const row = byPort.get(port.id)
     const anomaly = byAnomaly.get(port.id)
-    const severity = anomaly ? anomaly.severity : 'low'
+    const severity = anomaly ? (anomaly.severity as Severity) : 'low'
     return {
       ...port,
       congestion: row,

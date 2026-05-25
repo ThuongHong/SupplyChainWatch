@@ -111,16 +111,16 @@ def _template_commentary(forecast: Forecast) -> str:
 
 def _recent_related_signals(db: Session) -> list[dict[str, Any]]:
     result = db.execute(text("""
-            SELECT AVG(total_in_area)::float AS average_port_congestion
-            FROM port_congestion
+            SELECT AVG(score)::float AS average_portwatch_risk
+            FROM port_risk_scores
             WHERE time >= NOW() - INTERVAL '30 days'
             """)).mappings().first()
     signals: list[dict[str, Any]] = []
-    if result and result["average_port_congestion"] is not None:
+    if result and result["average_portwatch_risk"] is not None:
         signals.append(
             {
-                "signal_name": "average_port_congestion_30d",
-                "value": float(result["average_port_congestion"]),
+                "signal_name": "average_portwatch_risk_30d",
+                "value": float(result["average_portwatch_risk"]),
             }
         )
     bunker = db.execute(text("""

@@ -98,13 +98,11 @@ async def _load_series(
     elif entity_type == "port":
         result = await db.execute(
             text("""
-                SELECT DATE_TRUNC('day', pc.time)::date AS day,
-                       AVG(pc.total_in_area)::float AS value
-                FROM port_congestion pc
-                JOIN ports p ON p.id = pc.port_id
-                WHERE (p.locode = :entity_id OR LOWER(p.name) = LOWER(:entity_id)
-                       OR pc.port_id::text = :entity_id)
-                  AND pc.time >= NOW() - (:period_days * INTERVAL '1 day')
+                SELECT snapshot_date AS day, AVG(risk_score)::float AS value
+                FROM risk_feature_snapshots
+                WHERE entity_type = 'port'
+                  AND (entity_id = :entity_id OR LOWER(entity_name) = LOWER(:entity_id))
+                  AND snapshot_date >= CURRENT_DATE - (:period_days * INTERVAL '1 day')
                 GROUP BY day
                 ORDER BY day
                 """),
@@ -113,14 +111,10 @@ async def _load_series(
     elif entity_type == "chokepoint":
         result = await db.execute(
             text("""
-                SELECT DATE_TRUNC('day', cs.time)::date AS day,
-                       AVG(COALESCE(cs.risk_score, cs.vessel_count::real))::float AS value
-                FROM chokepoint_status cs
-                JOIN chokepoints c ON c.id = cs.chokepoint_id
-                WHERE (LOWER(REPLACE(c.name, ' ', '_')) = LOWER(:entity_id)
-                       OR LOWER(c.name) = LOWER(:entity_id)
-                       OR cs.chokepoint_id::text = :entity_id)
-                  AND cs.time >= NOW() - (:period_days * INTERVAL '1 day')
+                SELECT DATE_TRUNC('day', time)::date AS day, AVG(score)::float AS value
+                FROM chokepoint_risk_scores
+                WHERE (entity_id = :entity_id OR LOWER(entity_name) = LOWER(:entity_id))
+                  AND time >= NOW() - (:period_days * INTERVAL '1 day')
                 GROUP BY day
                 ORDER BY day
                 """),

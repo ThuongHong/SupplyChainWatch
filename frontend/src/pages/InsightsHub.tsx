@@ -22,8 +22,6 @@ import {
   type InsightResponse,
   type RiskScoreResponse,
   type RiskStoryEventResponse,
-  type StoryAnalyzeResponse,
-  type StoryEntity,
 } from '../api/client'
 import { ENABLE_DEMO_FALLBACK } from '../api/config'
 import { queryKeys } from '../api/queries'
@@ -56,7 +54,7 @@ type FeedInsight = {
 }
 
 const CATS: CatFilter[] = ['all', 'port_risk', 'risk_story', 'data_quality', 'correlation', 'trend', 'anomaly', 'forecast']
-const CAT_LABELS: Record<CatFilter, string> = { all: 'All', port_risk: 'Port Risk', risk_story: 'Risk Story', data_quality: 'Data Quality', correlation: 'Correlation', trend: 'Trend', anomaly: 'Anomaly', forecast: 'Forecast' }
+const CAT_LABELS: Record<CatFilter, string> = { all: 'All', port_risk: 'Traffic Anomaly', risk_story: 'Risk Story', data_quality: 'Data Quality', correlation: 'Correlation', trend: 'Trend', anomaly: 'Anomaly', forecast: 'Forecast' }
 
 const DEMO_INSIGHTS: FeedInsight[] = [
   { title: 'Demo trend', text: 'BDI surged over several sessions, a pattern to verify against live freight_indices data.', category: 'trend', time: 'demo', aiGenerated: false },
@@ -344,65 +342,6 @@ const AnomalyTimeline: React.FC<{ anomalies: AnomalyResponse[]; demo: boolean }>
   )
 }
 
-const STORY_PAIRS: { label: string; entityA: StoryEntity; entityB: StoryEntity }[] = [
-  { label: 'BDI × FBX', entityA: { type: 'index', id: 'BDI' }, entityB: { type: 'index', id: 'FBX_GLOBAL' } },
-  { label: 'Shanghai × FBX', entityA: { type: 'port', id: 'Shanghai' }, entityB: { type: 'index', id: 'FBX_GLOBAL' } },
-  { label: 'Suez × WCI', entityA: { type: 'chokepoint', id: 'suez_canal' }, entityB: { type: 'index', id: 'WCI_GLOBAL' } },
-]
-
-const StoryMode: React.FC = () => {
-  const [selected, setSelected] = useState(0)
-  const pair = STORY_PAIRS[selected]
-  const storyQuery = useQuery<StoryAnalyzeResponse>({
-    queryKey: queryKeys.story(pair.label),
-    queryFn: ({ signal }) => apiClient.storyAnalyze({ entity_a: pair.entityA, entity_b: pair.entityB, period_days: 90 }, { signal }),
-    retry: false,
-  })
-  const storyUsesTemplate = storyQuery.data?.narrative.includes('template summary is shown') ?? false
-
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-        {STORY_PAIRS.map((item, i) => (
-          <button key={item.label} onClick={() => setSelected(i)} style={{
-            padding: '4px 10px', borderRadius: 4, border: 'none', cursor: 'pointer',
-            fontSize: 11, fontWeight: 500, background: selected === i ? 'var(--accent-muted)' : 'var(--bg-hover)',
-            color: selected === i ? 'var(--accent-text)' : 'var(--text-muted)',
-          }}>{item.label}</button>
-        ))}
-      </div>
-      <div style={{ padding: 14, borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', fontSize: 13, lineHeight: 1.7, color: 'var(--text-secondary)' }}>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          <Badge variant="accent">{pair.entityA.id}</Badge>
-          <Badge variant="info">{pair.entityB.id}</Badge>
-          {storyQuery.data && (
-            <Badge variant={storyUsesTemplate ? 'default' : 'success'}>
-              {storyUsesTemplate ? 'Template' : 'AI-generated'}
-            </Badge>
-          )}
-        </div>
-        {storyQuery.isLoading && <SkeletonBlock height={100} />}
-        {storyQuery.error && <ErrorPanel error={storyQuery.error} title="Story Mode unavailable" compact />}
-        {storyQuery.data && (
-          <>
-            <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>{storyQuery.data.headline}</div>
-            <div style={{ whiteSpace: 'pre-line' }}>{storyQuery.data.narrative}</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-              {storyQuery.data.key_findings.slice(0, 3).map(finding => <Badge key={finding} variant="default">{finding}</Badge>)}
-            </div>
-            {storyQuery.data.caveats.length > 0 && (
-              <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Caveats</div>
-                {storyQuery.data.caveats.map(caveat => <div key={caveat} style={{ fontSize: 12 }}>{caveat}</div>)}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
 export const InsightsHub: React.FC = () => {
   const [catFilter, setCatFilter] = useState<CatFilter>('all')
   const insightsQuery = useQuery({
@@ -531,7 +470,7 @@ export const InsightsHub: React.FC = () => {
   return (
     <PageShell
       title="Insights Hub"
-      subtitle="Evidence-backed narratives, correlations, forecasts, anomalies, and Story Mode."
+      subtitle="Evidence-backed narratives, PortWatch risk stories, correlations, forecasts, and anomalies."
       action={<DataProvenance mode={rowDataMode({ loading: insightsQuery.isLoading, error: insightsQuery.error, rowCount: liveFeed.length, demoEnabled: ENABLE_DEMO_FALLBACK })} source={usingDemoFeed ? 'Explicit demo fallback enabled' : '/api/insights/latest'} />}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -613,16 +552,10 @@ export const InsightsHub: React.FC = () => {
           loading={portRiskQuery.isLoading || chokepointRiskQuery.isLoading || riskCoverageQuery.isLoading || riskStoriesQuery.isLoading || riskForecastQuery.isLoading}
         />
 
-        <div className="responsive-grid grid-two" style={{ gap: 16 }}>
-          <Card style={{ padding: 16 }}>
-            <SectionHeader title="Anomaly Timeline" sub="90-day anomaly events with explicit fallback state." />
-            {anomaliesQuery.isLoading ? <SkeletonBlock height={94} /> : <AnomalyTimeline anomalies={anomaliesQuery.data ?? []} demo={useDemoAnomalies} />}
-          </Card>
-          <Card style={{ padding: 16 }}>
-            <SectionHeader title="Story Mode" sub="LLM-assisted relationship analysis with caveats." />
-            <StoryMode />
-          </Card>
-        </div>
+        <Card style={{ padding: 16 }}>
+          <SectionHeader title="Anomaly Timeline" sub="90-day anomaly events with explicit fallback state." />
+          {anomaliesQuery.isLoading ? <SkeletonBlock height={94} /> : <AnomalyTimeline anomalies={anomaliesQuery.data ?? []} demo={useDemoAnomalies} />}
+        </Card>
       </div>
     </PageShell>
   )

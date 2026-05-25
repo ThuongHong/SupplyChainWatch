@@ -1,3 +1,14 @@
+"""Anomaly detection for freight indices and port metrics.
+
+.. note:: AISStream boundary
+    The ``vessel_positions`` and ``port_congestion`` tables are populated by
+    AISStream and are reserved **exclusively** for live map visualisation and
+    current vessel / port display.  They MUST NOT be used as inputs to anomaly
+    detection, historical anomaly timelines, maritime risk scores, or dashboard
+    alerts.  Any function that previously queried those tables has been disabled
+    or refactored to use only ``portwatch_metrics``.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -33,7 +44,12 @@ def severity_from_z_score(z_score: float) -> str:
 
 
 def detect_anomalies(db: Session) -> int:
-    """Detect index and port-congestion anomalies and persist them."""
+    """Detect freight-index anomalies and persist them.
+
+    Only ``freight_indices`` (sourced from FRED, FBX, WCI, etc.) is queried.
+    AISStream-derived tables (``vessel_positions``, ``port_congestion``) are
+    **not** consulted here; they are visualization-only.
+    """
     created = 0
     created += detect_index_anomalies(db)
     created += detect_port_congestion_anomalies(db)
@@ -81,55 +97,9 @@ def detect_index_anomalies(db: Session) -> int:
 
 
 def detect_port_congestion_anomalies(db: Session) -> int:
-    """Detect congestion anomalies using current total vessels versus 30-day baseline."""
-    result = db.execute(text("""
-            WITH latest AS (
-                SELECT DISTINCT ON (port_id)
-                       port_id, time, total_in_area
-                FROM port_congestion
-                ORDER BY port_id, time DESC
-            ),
-            baseline AS (
-                SELECT port_id,
-                       AVG(total_in_area)::float AS avg_total,
-                       STDDEV_POP(total_in_area)::float AS std_total
-                FROM port_congestion
-                WHERE time >= NOW() - INTERVAL '30 days'
-                GROUP BY port_id
-            )
-            SELECT latest.port_id, latest.time, latest.total_in_area,
-                   baseline.avg_total, baseline.std_total
-            FROM latest
-            JOIN baseline ON baseline.port_id = latest.port_id
-            WHERE baseline.std_total > 0
-            """))
-    created = 0
-    for row in result.mappings().all():
-        observed = float(row["total_in_area"])
-        expected = float(row["avg_total"])
-        stddev = float(row["std_total"])
-        z_score = (observed - expected) / stddev
-        if abs(z_score) <= 2.5:
-            continue
-        severity = severity_from_z_score(z_score)
-        port_id = str(row["port_id"])
-        db.add(
-            Anomaly(
-                entity_type="port",
-                entity_id=port_id,
-                severity=severity,
-                metric="total_in_area",
-                observed=observed,
-                expected=expected,
-                z_score=z_score,
-                description=(
-                    f"Port {port_id} congestion is {z_score:.1f} standard deviations "
-                    "from its 30-day baseline."
-                ),
-            )
-        )
-        created += 1
-    return created
+    """Disabled: ``port_congestion`` is an AISStream table reserved for visualization only."""
+    # AISStream is visualization-only; port_congestion must not feed anomaly detection.
+    return 0
 
 
 def compute_port_historical_anomalies(
@@ -144,54 +114,37 @@ def compute_port_historical_anomalies(
     # Fetch enough history to build baseline (days + 7)
     total_days = days + 7
     sql = """
-        SELECT pc.time, pc.port_id, p.name AS port_name,
-               pc.anchored_count, pc.moored_count, pc.underway_count,
-               pc.total_in_area, pc.avg_dwell_hours, pc.median_speed
-            FROM port_congestion pc
-            JOIN ports p ON p.id = pc.port_id
-            WHERE pc.time >= NOW() - (:total_days * INTERVAL '1 day')
+        SELECT DISTINCT ON (pm.observed_at, p.id)
+               pm.observed_at AS time,
+               p.id AS port_id,
+               p.name AS port_name,
+               COALESCE(pw_total.metric_value, 0) AS total_in_area,
+               COALESCE(pw_calls.metric_value, 0) AS anchored_count,
+               COALESCE(pw_import.metric_value, 0) AS avg_dwell_hours,
+               COALESCE(pw_export.metric_value, 0) AS median_speed
+        FROM portwatch_metrics pm
+        JOIN ports p ON p.name = pm.entity_name
+        LEFT JOIN portwatch_metrics pw_total ON pw_total.observed_at = pm.observed_at
+            AND pw_total.entity_name = pm.entity_name
+            AND pw_total.metric_name IN ('portcalls', 'n_total', 'daily_vessel_calls')
+        LEFT JOIN portwatch_metrics pw_calls ON pw_calls.observed_at = pm.observed_at
+            AND pw_calls.entity_name = pm.entity_name
+            AND pw_calls.metric_name IN ('import', 'traffic_anomaly_index')
+        LEFT JOIN portwatch_metrics pw_import ON pw_import.observed_at = pm.observed_at
+            AND pw_import.entity_name = pm.entity_name
+            AND pw_import.metric_name IN ('export', 'trade_volume_index')
+        LEFT JOIN portwatch_metrics pw_export ON pw_export.observed_at = pm.observed_at
+            AND pw_export.entity_name = pm.entity_name
+            AND pw_export.metric_name IN ('transit_capacity_index')
+        WHERE pm.observed_at >= NOW() - (:total_days * INTERVAL '1 day')
     """
-    params: dict[str, object] = {"total_days": total_days}
+    params = {"total_days": total_days}
     if port_id is not None:
-        sql += " AND pc.port_id = :port_id"
+        sql += " AND p.id = :port_id"
         params["port_id"] = port_id
-    sql += " ORDER BY pc.port_id, pc.time ASC"
+    sql += " ORDER BY p.id, pm.observed_at ASC"
     result = db.execute(text(sql), params)
     rows = result.mappings().all()
-    
-    if len(rows) < 10:
-        sql = """
-            SELECT DISTINCT ON (pm.observed_at, p.id)
-                   pm.observed_at AS time,
-                   p.id AS port_id,
-                   p.name AS port_name,
-                   COALESCE(pw_total.metric_value, 0) AS total_in_area,
-                   COALESCE(pw_calls.metric_value, 0) AS anchored_count,
-                   COALESCE(pw_import.metric_value, 0) AS avg_dwell_hours,
-                   COALESCE(pw_export.metric_value, 0) AS median_speed
-            FROM portwatch_metrics pm
-            JOIN ports p ON p.name = pm.entity_name
-            LEFT JOIN portwatch_metrics pw_total ON pw_total.observed_at = pm.observed_at
-                AND pw_total.entity_name = pm.entity_name
-                AND pw_total.metric_name IN ('portcalls', 'n_total', 'daily_vessel_calls')
-            LEFT JOIN portwatch_metrics pw_calls ON pw_calls.observed_at = pm.observed_at
-                AND pw_calls.entity_name = pm.entity_name
-                AND pw_calls.metric_name IN ('import', 'traffic_anomaly_index')
-            LEFT JOIN portwatch_metrics pw_import ON pw_import.observed_at = pm.observed_at
-                AND pw_import.entity_name = pm.entity_name
-                AND pw_import.metric_name IN ('export', 'trade_volume_index')
-            LEFT JOIN portwatch_metrics pw_export ON pw_export.observed_at = pm.observed_at
-                AND pw_export.entity_name = pm.entity_name
-                AND pw_export.metric_name IN ('transit_capacity_index')
-            WHERE pm.observed_at >= NOW() - (:total_days * INTERVAL '1 day')
-        """
-        params = {"total_days": total_days}
-        if port_id is not None:
-            sql += " AND p.id = :port_id"
-            params["port_id"] = port_id
-        sql += " ORDER BY p.id, pm.observed_at ASC"
-        result = db.execute(text(sql), params)
-        rows = result.mappings().all()
 
     # Group by port_id
     grouped_points: dict[int, list[dict[str, object]]] = {}
@@ -347,25 +300,46 @@ async def compute_port_historical_anomalies_async(
     severity: str | None = None,
     port_id: int | None = None,
 ) -> list[dict[str, object]]:
-    """Compute rolling z-score anomalies for ports dynamically using AsyncSession."""
+    """Compute rolling z-score anomalies for ports dynamically using AsyncSession.
+
+    Data source: ``portwatch_metrics`` only.  The AISStream-derived
+    ``port_congestion`` table is **not** queried here; it is reserved for live
+    map visualisation.
+    """
     from datetime import UTC, datetime, timedelta
 
     # Fetch enough history to build baseline (days + 7)
     total_days = days + 7
     sql = """
-        SELECT pc.time, pc.port_id, p.name AS port_name,
-               pc.anchored_count, pc.moored_count, pc.underway_count,
-               pc.total_in_area, pc.avg_dwell_hours, pc.median_speed
-        FROM port_congestion pc
-        JOIN ports p ON p.id = pc.port_id
-        WHERE pc.time >= NOW() - (:total_days * INTERVAL '1 day')
+        SELECT DISTINCT ON (pm.observed_at, p.id)
+               pm.observed_at AS time,
+               p.id AS port_id,
+               p.name AS port_name,
+               COALESCE(pw_total.metric_value, 0) AS total_in_area,
+               COALESCE(pw_calls.metric_value, 0) AS anchored_count,
+               COALESCE(pw_import.metric_value, 0) AS avg_dwell_hours,
+               COALESCE(pw_export.metric_value, 0) AS median_speed
+        FROM portwatch_metrics pm
+        JOIN ports p ON p.name = pm.entity_name
+        LEFT JOIN portwatch_metrics pw_total ON pw_total.observed_at = pm.observed_at
+            AND pw_total.entity_name = pm.entity_name
+            AND pw_total.metric_name IN ('portcalls', 'n_total', 'daily_vessel_calls')
+        LEFT JOIN portwatch_metrics pw_calls ON pw_calls.observed_at = pm.observed_at
+            AND pw_calls.entity_name = pm.entity_name
+            AND pw_calls.metric_name IN ('import', 'traffic_anomaly_index')
+        LEFT JOIN portwatch_metrics pw_import ON pw_import.observed_at = pm.observed_at
+            AND pw_import.entity_name = pm.entity_name
+            AND pw_import.metric_name IN ('export', 'trade_volume_index')
+        LEFT JOIN portwatch_metrics pw_export ON pw_export.observed_at = pm.observed_at
+            AND pw_export.entity_name = pm.entity_name
+            AND pw_export.metric_name IN ('transit_capacity_index')
+        WHERE pm.observed_at >= NOW() - (:total_days * INTERVAL '1 day')
     """
     params: dict[str, object] = {"total_days": total_days}
     if port_id is not None:
-        sql += " AND pc.port_id = :port_id"
+        sql += " AND p.id = :port_id"
         params["port_id"] = port_id
-
-    sql += " ORDER BY pc.port_id, pc.time ASC"
+    sql += " ORDER BY p.id, pm.observed_at ASC"
 
     result = await db.execute(text(sql), params)
     rows = result.mappings().all()

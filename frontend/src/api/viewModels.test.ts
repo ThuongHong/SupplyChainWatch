@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { rowDataMode, shouldUseDemoRows } from './viewModels'
+import { latestPortAnomalyById, rowDataMode, shouldUseDemoRows } from './viewModels'
+
+describe('latestPortAnomalyById', () => {
+  it('uses the newest anomaly row for each port instead of any older high severity row', () => {
+    const byPort = latestPortAnomalyById([
+      { port_id: 1, severity: 'high', detected_at: '2026-05-20T00:00:00Z' },
+      { port_id: 1, severity: 'low', detected_at: '2026-05-21T00:00:00Z' },
+      { port_id: 2, severity: 'medium', time: '2026-05-22T00:00:00Z' },
+    ])
+
+    expect(byPort.get(1)?.severity).toBe('low')
+    expect(byPort.get(2)?.severity).toBe('medium')
+  })
+})
 
 describe('frontend row data state', () => {
   it('renders empty state for empty normal-mode API rows', () => {

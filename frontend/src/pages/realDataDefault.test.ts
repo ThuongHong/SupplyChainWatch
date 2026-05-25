@@ -11,8 +11,8 @@ describe('real data default page behavior', () => {
   it('keeps Dashboard demo port risk and insights behind explicit demo mode', () => {
     const source = readPage('Dashboard.tsx')
     expect(source).toMatch(/ENABLE_DEMO_FALLBACK/)
-    expect(source).toMatch(/displayedPorts = livePorts\.length \? livePorts : useDemoPorts \? demoDashboardPorts\(\) : \[\]/)
-    expect(source).toMatch(/No PortWatch congestion telemetry/)
+    expect(source).toMatch(/displayedRiskPorts = liveRiskPorts\.length \? liveRiskPorts : useDemoRiskPorts \? demoDashboardRiskRows\(\) : \[\]/)
+    expect(source).toMatch(/No PortWatch risk snapshots/)
   })
 
   it('keeps Ports demo rows behind explicit demo mode', () => {
@@ -26,9 +26,8 @@ describe('real data default page behavior', () => {
   it('keeps Exploratory Analysis feed examples behind explicit demo mode', () => {
     const source = readPage('Analytics.tsx')
     expect(source).toMatch(/ENABLE_DEMO_FALLBACK/)
-    expect(source).toMatch(/const feed = usingDemoFeed \? DEMO_INSIGHTS : liveFeed/)
-    expect(source).toMatch(/No live insight rows/)
-    expect(source).toMatch(/No correlation rows/)
+    expect(source).toMatch(/No real PortWatch time series data available/)
+    expect(source).toMatch(/No PortWatch port anomalies detected/)
     expect(source).toMatch(/Port Anomaly Detection Log/)
     expect(source).toMatch(/AIS vessel anomalies are excluded/)
     expect(source).not.toMatch(/AI Risk Workbench/)
