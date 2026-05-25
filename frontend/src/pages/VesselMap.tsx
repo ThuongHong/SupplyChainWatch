@@ -216,8 +216,14 @@ interface RealMapProps {
 }
 
 const REAL_MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+const HEATMAP_LAYER_VISUALS = {
+  'heatmap-opacity': 0.86,
+  deepWaterRgb: [1, 18, 6, 46] as [number, number, number, number],
+  warmStop: [0.9, 'rgba(251,146,60,0.96)'] as [number, string],
+}
 
 const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, onViewport, layers, mapMode, anomalies }) => {
+  const mapRef = useRef<any>(null)
   const [viewState, setViewState] = useState({
     longitude: 35,
     latitude: 22,
@@ -247,6 +253,23 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
       onViewport(`${minLon},${minLat},${maxLon},${maxLat}`);
     }, 250);
   }, [onViewport]);
+
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!map) return
+    if (mapMode === 'flat') {
+      map.setProjection({ type: 'mercator' })
+      map.setSky(undefined)
+      return
+    }
+    map.setProjection({ type: 'globe' })
+    map.setSky({
+      'atmosphere-blend': 0.9,
+      'atmosphere-color': 'rgba(14,165,165,0.35)',
+      'space-color': '#020617',
+      'star-intensity': 0.2,
+    })
+  }, [mapMode])
 
   const portsQuery = useQuery({
     queryKey: queryKeys.ports(),
@@ -290,9 +313,10 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
       getWeight: (d: any) => d.speed || 1,
       radiusPixels: 40,
       intensity: 1,
+      opacity: HEATMAP_LAYER_VISUALS['heatmap-opacity'],
       threshold: 0.05,
       colorRange: [
-        [45, 212, 191, 0],
+        HEATMAP_LAYER_VISUALS.deepWaterRgb,
         [56, 189, 248, 128],
         [250, 204, 21, 200],
         [251, 146, 60, 230],
@@ -352,6 +376,7 @@ const VesselRealMap: React.FC<RealMapProps> = ({ vessels, selectedId, onSelect, 
         getCursor={({ isDragging, isHovering }: any) => isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab'}
       >
         <Map
+          ref={mapRef}
           mapStyle={REAL_MAP_STYLE}
           reuseMaps
         >

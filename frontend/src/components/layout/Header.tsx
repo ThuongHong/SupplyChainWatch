@@ -11,8 +11,7 @@ const PAGE_META: Record<PageId, { parent: string; title: string }> = {
   indices: { parent: 'Macro Trends', title: 'Freight & Indices' },
   vessels: { parent: 'Micro Causes', title: 'Live Vessel Map' },
   ports: { parent: 'Micro Causes', title: 'Port Congestion' },
-  insights: { parent: 'Intelligence', title: 'AI Risk Workbench' },
-  analytics: { parent: 'Intelligence', title: 'EDA Analytics' },
+  analytics: { parent: 'Intelligence', title: 'Exploratory Analysis' },
 }
 
 interface HeaderProps {
@@ -56,48 +55,29 @@ export const Header: React.FC<HeaderProps> = ({ theme, onThemeToggle, page }) =>
   }
 
   return (
-    <header style={{ height: 48, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+    <header className="app-header">
+      <div className="app-header__crumbs" style={{ fontSize: 13 }}>
         <span style={{ color: 'var(--text-muted)' }}>{PAGE_META[page].parent}</span>
         <Icons.ChevronRight size={14} style={{ color: 'var(--text-muted)' } as React.CSSProperties} />
         <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{PAGE_META[page].title}</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="app-header__actions">
         <button
+          className="app-button"
           onClick={handleForceSync}
           disabled={isSyncing}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            height: 30,
-            padding: '0 12px',
-            borderRadius: 15,
-            border: '1px solid var(--border-default)',
-            background: 'var(--bg-elevated)',
-            color: 'var(--text-primary)',
-            fontSize: 11,
-            fontWeight: 500,
-            cursor: isSyncing ? 'not-allowed' : 'pointer',
-            opacity: isSyncing ? 0.7 : 1,
-            transition: 'all 0.2s ease',
-          }}
-          onMouseEnter={e => { if (!isSyncing) { (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)'; } }}
-          onMouseLeave={e => { if (!isSyncing) { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)'; (e.currentTarget as HTMLElement).style.background = 'var(--bg-elevated)'; } }}
         >
           <Icons.RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
           <span>{isSyncing ? (syncStatus || 'Syncing...') : 'Force Fetch'}</span>
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 10px', borderRadius: 15, background: status === 'danger' ? 'var(--danger-muted)' : status === 'warning' ? 'var(--warning-muted)' : 'var(--success-muted)' }}>
+        <div className={`status-pill status-pill--${status}`}>
           <StatusDot status={status} pulse={status !== 'danger'} size={6} />
-          <span style={{ fontSize: 11, fontWeight: 500, color: status === 'danger' ? 'var(--danger)' : status === 'warning' ? 'var(--warning)' : 'var(--success)' }}>{statusLabel}</span>
+          <span style={{ fontSize: 11, fontWeight: 600 }}>{statusLabel}</span>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        <div className="app-header__base">
           Base <span className="mono-num">{API_BASE_URL.replace(/^https?:\/\//, '')}</span>
         </div>
-        <button aria-label="Toggle theme" style={{ width: 32, height: 32, borderRadius: 6, border: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', background: 'transparent' }} onClick={onThemeToggle}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)'; (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)' }}>
+        <button className="app-button app-button--ghost" aria-label="Toggle theme" onClick={onThemeToggle}>
           {theme === 'dark' ? <Icons.Sun size={16} /> : <Icons.Moon size={16} />}
         </button>
       </div>

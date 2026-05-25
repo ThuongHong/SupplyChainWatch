@@ -505,6 +505,28 @@ export const InsightsHub: React.FC = () => {
     rowCount: anomaliesQuery.data?.length ?? 0,
     demoEnabled: ENABLE_DEMO_FALLBACK,
   })
+  const proofCards = [
+    {
+      label: 'Narratives',
+      value: usingDemoFeed ? 'Demo' : String(liveFeed.length),
+      detail: usingDemoFeed ? 'explicit fallback mode' : 'live insight rows',
+    },
+    {
+      label: 'Correlation',
+      value: correlationsQuery.data?.length ? String(correlationsQuery.data.length) : '0',
+      detail: labels.length ? `${labels.length} aligned index series` : 'waiting for overlap',
+    },
+    {
+      label: 'Anomalies',
+      value: String(anomaliesQuery.data?.length ?? 0),
+      detail: '90-day events from backend detector',
+    },
+    {
+      label: 'Risk stories',
+      value: String(riskStoriesQuery.data?.length ?? 0),
+      detail: activeRiskEntityId || 'no ranked entity yet',
+    },
+  ]
 
   return (
     <PageShell
@@ -515,15 +537,27 @@ export const InsightsHub: React.FC = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {error && <ErrorPanel error={error} title="One or more insight APIs are unavailable" compact />}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 16 }}>
+        <div className="evidence-strip">
+          {proofCards.map(card => (
+            <div className="evidence-card" key={card.label}>
+              <div className="evidence-card__label">{card.label}</div>
+              <div className="evidence-card__value">{card.value}</div>
+              <div className="evidence-card__detail">{card.detail}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="responsive-grid grid-feed">
           <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
+            <div className="tab-strip">
               {CATS.map(category => (
-                <button key={category} onClick={() => setCatFilter(category)} style={{
-                  padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  fontSize: 12, fontWeight: 500, background: catFilter === category ? 'var(--accent-muted)' : 'transparent',
-                  color: catFilter === category ? 'var(--accent-text)' : 'var(--text-muted)',
-                }}>{CAT_LABELS[category]}</button>
+                <button
+                  key={category}
+                  className={catFilter === category ? 'tab-button tab-button--active' : 'tab-button'}
+                  onClick={() => setCatFilter(category)}
+                >
+                  {CAT_LABELS[category]}
+                </button>
               ))}
             </div>
             <Card style={{ padding: '4px 16px' }}>
@@ -579,7 +613,7 @@ export const InsightsHub: React.FC = () => {
           loading={portRiskQuery.isLoading || chokepointRiskQuery.isLoading || riskCoverageQuery.isLoading || riskStoriesQuery.isLoading || riskForecastQuery.isLoading}
         />
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
+        <div className="responsive-grid grid-two" style={{ gap: 16 }}>
           <Card style={{ padding: 16 }}>
             <SectionHeader title="Anomaly Timeline" sub="90-day anomaly events with explicit fallback state." />
             {anomaliesQuery.isLoading ? <SkeletonBlock height={94} /> : <AnomalyTimeline anomalies={anomaliesQuery.data ?? []} demo={useDemoAnomalies} />}

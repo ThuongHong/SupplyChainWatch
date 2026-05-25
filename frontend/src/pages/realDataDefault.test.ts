@@ -23,13 +23,25 @@ describe('real data default page behavior', () => {
     expect(source).toMatch(/if \(!demo\) return \[\]/)
   })
 
-  it('keeps Insights Hub feed and visual examples behind explicit demo mode', () => {
-    const source = readPage('InsightsHub.tsx')
+  it('keeps Exploratory Analysis feed examples behind explicit demo mode', () => {
+    const source = readPage('Analytics.tsx')
     expect(source).toMatch(/ENABLE_DEMO_FALLBACK/)
     expect(source).toMatch(/const feed = usingDemoFeed \? DEMO_INSIGHTS : liveFeed/)
-    expect(source).toMatch(/demo=\{useDemoCorrelations\}/)
-    expect(source).toMatch(/demo=\{useDemoAnomalies\}/)
-    expect(source).toMatch(/No live anomaly rows/)
+    expect(source).toMatch(/No live insight rows/)
+    expect(source).toMatch(/No correlation rows/)
+    expect(source).toMatch(/Port Anomaly Detection Log/)
+    expect(source).toMatch(/AIS vessel anomalies are excluded/)
+    expect(source).not.toMatch(/AI Risk Workbench/)
+  })
+
+  it('removes the AI Risk Workbench route from primary navigation', () => {
+    const sidebar = readComponent('layout/Sidebar.tsx')
+    const header = readComponent('layout/Header.tsx')
+
+    expect(sidebar).toMatch(/Exploratory Analysis/)
+    expect(header).toMatch(/Exploratory Analysis/)
+    expect(sidebar).not.toMatch(/AI Risk Workbench/)
+    expect(header).not.toMatch(/AI Risk Workbench/)
   })
 
   it('uses live freshness rows for sidebar status instead of hardcoded sync text', () => {

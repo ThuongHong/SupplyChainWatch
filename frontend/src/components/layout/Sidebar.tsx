@@ -6,7 +6,7 @@ import { relativeTime } from '../../api/viewModels'
 import { Icons } from '../icons'
 import { StatusDot } from '../StatusDot'
 
-type PageId = 'dashboard' | 'indices' | 'vessels' | 'ports' | 'insights' | 'analytics'
+type PageId = 'dashboard' | 'indices' | 'vessels' | 'ports' | 'analytics'
 
 const NAV_GROUPS: { title: string; items: { id: PageId; label: string; iconKey: keyof typeof Icons }[] }[] = [
   {
@@ -26,8 +26,7 @@ const NAV_GROUPS: { title: string; items: { id: PageId; label: string; iconKey: 
   {
     title: 'INTELLIGENCE',
     items: [
-      { id: 'insights', label: 'AI Risk Workbench', iconKey: 'Lightbulb' },
-      { id: 'analytics', label: 'EDA Analytics', iconKey: 'Activity' },
+      { id: 'analytics', label: 'Exploratory Analysis', iconKey: 'Activity' },
     ]
   }
 ]
@@ -62,12 +61,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ active, open, onToggle, onNavi
         ? `${freshRows}/${rows.length} fresh${latestObserved ? ` · ${relativeTime(latestObserved)}` : ''}`
         : 'No source status'
   return (
-    <nav style={{ width: w, minWidth: w, height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', borderRight: '1px solid var(--border-subtle)', transition: 'width 0.2s ease, min-width 0.2s ease', overflow: 'hidden' }}>
+    <nav style={{ width: w, minWidth: w, height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', borderRight: '1px solid var(--border-subtle)', transition: 'width 0.2s ease, min-width 0.2s ease', overflow: 'hidden', boxShadow: '1px 0 0 rgba(255,255,255,0.02)' }}>
       <button aria-label={open ? 'Collapse navigation' : 'Expand navigation'} style={{ height: 52, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', border: 0, borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', flexShrink: 0, background: 'transparent', textAlign: 'left' }} onClick={onToggle}>
-        <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg, var(--accent), var(--info))', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 0 0 1px rgba(255,255,255,0.14) inset' }}>
           <Icons.Globe size={14} style={{ color: '#fff', strokeWidth: 2 } as React.CSSProperties} />
         </div>
-        {open && <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>GSW</span>}
+        {open && (
+          <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.05, whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>GSW</span>
+            <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.08em' }}>SUPPLY RISK</span>
+          </span>
+        )}
       </button>
       <div style={{ flex: 1, padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {NAV_GROUPS.map((group, gIdx) => (

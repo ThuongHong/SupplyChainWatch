@@ -176,6 +176,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
   const derivedRiskLive = displayedPorts.length > 0 || chokepointRows.length > 0
   const summaryUnavailable = !liveStats && !derivedRiskLive
   const staleSources = freshnessRows.filter(row => row.freshness_status === 'stale').length
+  const freshSources = freshnessRows.filter(row => row.freshness_status === 'fresh').length
 
   const topPortAnomaly = useMemo(() => {
     if (!topPort) return undefined
@@ -207,6 +208,28 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
 
   const bdiChange = percentChange(bdi)
   const fbxChange = percentChange(fbx)
+  const evidenceCards = [
+    {
+      label: 'Pipeline',
+      value: freshnessRows.length ? `${freshSources}/${freshnessRows.length}` : '0',
+      detail: freshnessRows.length ? 'sources fresh in latest API window' : 'source freshness not reported yet',
+    },
+    {
+      label: 'Analysis',
+      value: fmtNum((anomaliesQuery.data ?? []).length),
+      detail: 'anomaly rows feeding trend, risk, and timeline views',
+    },
+    {
+      label: 'Dashboard',
+      value: fmtNum(displayedPorts.length),
+      detail: 'ports ranked with congestion and risk context',
+    },
+    {
+      label: 'Interpretation',
+      value: fmtNum(liveInsights.length),
+      detail: liveInsights.length ? 'live narratives available for review' : 'waiting for generated insight rows',
+    },
+  ]
 
   const highPorts = (congestionQuery.data ?? []).filter(row => row.total_in_area >= 100 || row.anchored_count >= 45).length
 
@@ -227,7 +250,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
                   Start with global risk, inspect map and port pressure, then use Insights Hub for evidence-backed narratives.
                 </div>
               </div>
-              <button onClick={dismissTour} style={{ border: 0, borderRadius: 4, padding: '5px 10px', cursor: 'pointer', color: 'var(--accent-text)', background: 'var(--bg-elevated)' }}>Got it</button>
+              <button onClick={dismissTour} style={{ border: 0, borderRadius: 4, padding: '5px 10px', cursor: 'pointer', color: 'var(--accent-text)', background: 'var(--bg-elevated)', whiteSpace: 'nowrap' }}>Got it</button>
             </div>
           </Card>
         )}
@@ -242,7 +265,17 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         )}
         {apiError && <ErrorPanel error={apiError} title="Some dashboard APIs are unavailable" compact />}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(3, minmax(150px, 1fr))', gap: 12 }}>
+        <div className="evidence-strip">
+          {evidenceCards.map(card => (
+            <div className="evidence-card" key={card.label}>
+              <div className="evidence-card__label">{card.label}</div>
+              <div className="evidence-card__value">{card.value}</div>
+              <div className="evidence-card__detail">{card.detail}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="responsive-grid grid-kpi">
           <Card style={{ padding: 16, border: `1px solid ${topPort ? topPort.severity === 'high' ? 'var(--danger)' : topPort.severity === 'medium' ? 'var(--warning)' : 'var(--border-default)' : 'var(--border-default)'}` }}>
             <SectionHeader
               title="Port Congestion Intelligence"
@@ -268,19 +301,19 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
             action={<DataProvenance mode={derivedRiskLive ? 'live' : portsQuery.isLoading || congestionQuery.isLoading ? 'loading' : 'empty'} source="Dashboard live synthesis" />}
           />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-            <div style={{ padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
+            <div className="panel-note">
               <Badge variant={topPort ? (topPort.severity === 'high' ? 'danger' : topPort.severity === 'medium' ? 'warning' : 'success') : 'default'}>Current pressure</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {topPort ? `${topPort.name} leads port congestion with ${topPort.congestion?.total_in_area ?? 0} vessels in area and ${topPort.congestion?.anchored_count ?? 0} anchored.` : 'No live ranked port congestion row is available yet.'}
               </div>
             </div>
-            <div style={{ padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
+            <div className="panel-note">
               <Badge variant={riskStoryRows[0] ? riskTone(riskStoryRows[0].severity) : 'default'}>Latest story</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {riskStoryRows[0]?.narrative ?? 'No live risk story event has been generated for the top port.'}
               </div>
             </div>
-            <div style={{ padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
+            <div className="panel-note">
               <Badge variant={riskForecastDirection ? riskForecastDirection.delta >= 0 ? 'warning' : 'success' : staleSources ? 'danger' : 'default'}>Forward read</Badge>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {riskForecastDirection
@@ -293,7 +326,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           </div>
         </Card>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(300px, 2fr)', gap: 12 }}>
+        <div className="responsive-grid grid-main-side">
           <Card style={{ padding: '16px', minWidth: 0 }}>
             <SectionHeader
               title="Global Port Congestion Ranking"
@@ -303,7 +336,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
             {portsQuery.isLoading || congestionQuery.isLoading ? <SkeletonBlock height={200} /> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {displayedPorts.slice(0, 7).map(port => (
-                  <div key={port.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 80px minmax(160px, 2fr)', gap: 10, alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <div key={port.id} className="row-compact">
                     <span style={{ fontSize: 12, fontWeight: 600 }}>{port.name}</span>
                     <Badge variant={port.severity === 'high' ? 'danger' : port.severity === 'medium' ? 'warning' : 'success'}>
                       {port.severity.toUpperCase()}
@@ -328,9 +361,9 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           </Card>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
+        <div className="responsive-grid grid-two">
           <Card style={{ padding: '16px', minWidth: 0 }}>
-            <SectionHeader title="Disruption Propagation (The Ripple Effect)" sub="AI-predicted downstream impact based on current physical bottlenecks" />
+            <SectionHeader title="Disruption Propagation (The Ripple Effect)" sub="Modeled downstream impact based on current physical bottlenecks" />
             {(propagationRows.length ? propagationRows : []).slice(0, 4).map((row: DisruptionPropagationResponse) => (
               <div key={row.id} style={{ padding: '9px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
@@ -359,7 +392,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
               ))}
             </div>
             <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => onNavigate?.('insights')} style={{ border: 0, background: 'transparent', cursor: 'pointer' }}><Badge variant="accent">Open AI Risk Workbench →</Badge></button>
+              <button onClick={() => onNavigate?.('analytics')} style={{ border: 0, background: 'transparent', cursor: 'pointer' }}><Badge variant="accent">Open Exploratory Analysis →</Badge></button>
             </div>
           </Card>
         </div>
