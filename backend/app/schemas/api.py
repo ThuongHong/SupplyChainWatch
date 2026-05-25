@@ -324,6 +324,19 @@ class StoryAnalyzeResponse(BaseModel):
     caveats: list[str]
 
 
+class ChatAssistantRequest(BaseModel):
+    page: str = Field(..., min_length=1, max_length=40)
+    question: str = Field(..., min_length=1, max_length=1000)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatAssistantResponse(BaseModel):
+    answer: str
+    model: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
 class CorrelationCell(BaseModel):
     index_a: str
     index_b: str

@@ -11,6 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.rate_limit import limiter
+from app.api.routes.chat import router as chat_router
 from app.api.routes.chokepoints import router as chokepoints_router
 from app.api.routes.health import router as health_router
 from app.api.routes.indices import router as indices_router
@@ -36,6 +37,7 @@ app = FastAPI(
         {"name": "chokepoints", "description": "Chokepoint reference and risk timelines."},
         {"name": "insights", "description": "Anomalies, correlations, and narratives."},
         {"name": "story", "description": "LLM-assisted two-entity relationship analysis."},
+        {"name": "chat", "description": "Gemini-powered active-tab assistant."},
         {"name": "stats", "description": "Dashboard overview metrics."},
     ],
 )
@@ -62,6 +64,7 @@ app.include_router(risk_router, prefix="/api")
 app.include_router(chokepoints_router, prefix="/api")
 app.include_router(insights_router, prefix="/api")
 app.include_router(story_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
 app.include_router(sync_router, prefix="/api")
 

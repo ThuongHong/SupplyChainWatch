@@ -385,6 +385,19 @@ export interface StoryAnalyzeResponse {
   caveats: string[];
 }
 
+export interface ChatAssistantRequest {
+  page: string;
+  question: string;
+  context: Record<string, unknown>;
+}
+
+export interface ChatAssistantResponse {
+  answer: string;
+  model: string;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+}
+
 export interface CorrelationCell {
   index_a: string;
   index_b: string;
@@ -464,6 +477,13 @@ export const apiClient = {
     request<InsightResponse[]>(`/api/insights/latest${queryString({ limit })}`, init),
   storyAnalyze: (body: StoryAnalyzeRequest, init?: RequestInit) =>
     request<StoryAnalyzeResponse>("/api/story/analyze", {
+      ...init,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...init?.headers },
+      body: JSON.stringify(body),
+    }),
+  chatAssistant: (body: ChatAssistantRequest, init?: RequestInit) =>
+    request<ChatAssistantResponse>("/api/chat/assistant", {
       ...init,
       method: "POST",
       headers: { "Content-Type": "application/json", ...init?.headers },

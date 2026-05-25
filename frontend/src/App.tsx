@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react'
 import { Sidebar, type PageId } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
+import { ChatbotWidget } from './components/ChatbotWidget'
 import { Dashboard } from './pages/Dashboard'
 import { MacroIndices } from './pages/MacroIndices'
 import { Ports } from './pages/Ports'
@@ -76,6 +77,7 @@ export default function App() {
           <PageComponent onNavigate={navigate} />
         </Suspense>
       </div>
+      <ChatbotWidget page={page} />
     </div>
   )
 }

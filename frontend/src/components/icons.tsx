@@ -23,6 +23,8 @@ export const Icons = {
   Lightbulb: (p: IconProps) => <I {...p}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></I>,
   Search: (p: IconProps) => <I {...p}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></I>,
   Bell: (p: IconProps) => <I {...p}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></I>,
+  MessageCircle: (p: IconProps) => <I {...p}><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5a8.5 8.5 0 0 1 17 0Z"/></I>,
+  Send: (p: IconProps) => <I {...p}><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></I>,
   ChevronRight: (p: IconProps) => <I {...p}><path d="m9 18 6-6-6-6"/></I>,
   ChevronDown: (p: IconProps) => <I {...p}><path d="m6 9 6 6 6-6"/></I>,
   ArrowUpRight: (p: IconProps) => <I {...p}><path d="M7 7h10v10"/><path d="M7 17 17 7"/></I>,

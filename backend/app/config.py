@@ -37,6 +37,9 @@ class Settings(BaseSettings):
         default="GlobalSupplyWatch/0.1 academic project contact@example.com"
     )
     dashscope_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com"
     dashscope_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     llm_model_fast: str = "qwen3.5-flash"
     llm_model_fast_fallbacks: str = "qwen3.5-flash-2026-02-23"
