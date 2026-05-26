@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analysis.port_switch import recommendation_to_dict, recommend_switch
 from app.api.routes.helpers import rows_to_dicts
+from app.collectors.portwatch import PORTWATCH_ENTITY_BY_ID
 from app.db.session import get_async_db
-from app.schemas.api import PortCongestionResponse, PortResponse, PortActivityItem, PortComparisonItem
+from app.schemas.api import (
+    PortActivityItem,
+    PortComparisonItem,
+    PortCongestionResponse,
+    PortResponse,
+    SwitchRecommendationResponse,
+)
+from app.utils.cache import get_cached_json, set_cached_json
 
 router = APIRouter(prefix="/ports", tags=["ports"])
 
@@ -116,6 +125,43 @@ async def port_congestion_timeline(
             {"port_id": port_id, "days": days},
         )
     return rows_to_dicts(list(result.mappings().all()))
+
+
+@router.get("/{port_id}/switch_recommendation", response_model=SwitchRecommendationResponse)
+async def get_port_switch_recommendation(
+    port_id: int,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> dict[str, object]:
+    cache_key = f"port_switch:{port_id}"
+    cached = await get_cached_json(cache_key)
+    if cached is not None:
+        return cached
+
+    result = await db.execute(
+        text("""
+            SELECT locode
+            FROM ports
+            WHERE id = :port_id
+            LIMIT 1
+            """),
+        {"port_id": port_id},
+    )
+    row = result.mappings().first()
+    if not row or not row["locode"]:
+        raise HTTPException(status_code=404, detail="Port LOCODE not found")
+
+    entity_id = f"port-{str(row['locode']).lower()}"
+    entity = PORTWATCH_ENTITY_BY_ID.get(entity_id)
+    if entity is None or entity.entity_type != "port":
+        raise HTTPException(
+            status_code=404,
+            detail="PortWatch coverage not available for this port",
+        )
+
+    recommendation = await db.run_sync(lambda sync_db: recommend_switch(sync_db, entity_id))
+    payload = recommendation_to_dict(recommendation)
+    await set_cached_json(cache_key, payload, ttl_seconds=60)
+    return payload
 
 
 @router.get("/activity", response_model=list[PortActivityItem])

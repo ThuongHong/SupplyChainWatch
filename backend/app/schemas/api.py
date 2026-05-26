@@ -99,6 +99,50 @@ class PortComparisonItem(BaseModel):
     value: float
 
 
+
+class PortPressureItem(BaseModel):
+    entity_id: str
+    entity_name: str
+    port_id: int | None = None
+    asof: datetime
+    latest_vessel_calls: float | None = None
+    latest_anomaly_index: float | None = None
+    slope_7d_pct: float | None = None
+    slope_30d_pct: float | None = None
+    baseline_60d_mean: float | None = None
+    z_score_30d: float | None = None
+    anomaly_flag: bool
+    projection_7d: float | None = None
+    freshness_status: str
+
+
+class SwitchRecommendationResponse(BaseModel):
+    source: PortPressureItem
+    substitutes: list[PortPressureItem]
+    recommendation: PortPressureItem | None = None
+    headline: str
+    reason: str | None = None
+    generated_at: datetime
+    caveats: list[str] = Field(
+        default_factory=lambda: [
+            (
+                "PortWatch history is a rolling 180-day window, supporting 7-day and "
+                "30-day trend checks but not seasonality decomposition or year-over-year "
+                "comparison."
+            ),
+            "The 7-day projection is persistence plus linear slope, not an ML forecast.",
+            (
+                "Substitutes are limited to monitored PortWatch port entities; unmonitored "
+                "ports are never recommended."
+            ),
+            (
+                "AIS-derived port_congestion and vessel_positions tables are intentionally "
+                "not consulted for this recommendation."
+            ),
+        ]
+    )
+
+
 class ChokepointResponse(BaseModel):
     id: int
     name: str

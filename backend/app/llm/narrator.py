@@ -5,12 +5,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from app.db.models import Insight
 from app.llm.client import LLMClient
-from app.llm.prompts import build_narrative_prompt
+from app.llm.prompts import build_narrative_prompt, build_port_switch_prompt
 from app.llm.safety import collect_allowed_numbers, validate_narrative
 
 logger = structlog.get_logger(__name__)
@@ -55,12 +55,44 @@ async def enrich_insight_payload(
     return result.content, result.model
 
 
+async def enrich_port_switch_insight(
+    payload: dict[str, Any],
+    *,
+    fallback: str,
+    client: LLMClient | None = None,
+) -> tuple[str, str] | None:
+    """Generate a validated operator narrative for a switch-port recommendation."""
+    system_prompt, user_prompt = build_port_switch_prompt(payload)
+    result = await (client or LLMClient()).complete(
+        feature="port_switch_narrator",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        tier="fast",
+        temperature=0.3,
+        max_tokens=180,
+    )
+    if result is None:
+        return None
+    allowed_numbers = collect_allowed_numbers(payload)
+    validation_passed = validate_narrative(result.content, allowed_numbers)
+    logger.info(
+        "llm_narrative_validated",
+        feature="port_switch_narrator",
+        model=result.model,
+        validation_passed=validation_passed,
+    )
+    if not validation_passed:
+        logger.warning("llm_narrative_rejected", fallback_used=True, fallback=fallback)
+        return None
+    return result.content, result.model
+
+
 def enrich_top_insights(db: Session, *, limit: int = 10, client: LLMClient | None = None) -> int:
     """Enrich high-priority insights generated during the last 24 hours."""
     insights = (
         db.query(Insight)
         .filter(Insight.narrative_llm.is_(None))
-        .filter(Insight.priority >= 7)
+        .filter(or_(Insight.priority >= 7, Insight.category == "port_switch"))
         .filter(Insight.generated_at >= text("NOW() - INTERVAL '24 hours'"))
         .order_by(Insight.priority.desc(), Insight.generated_at.desc())
         .limit(limit)
@@ -68,10 +100,16 @@ def enrich_top_insights(db: Session, *, limit: int = 10, client: LLMClient | Non
     )
     enriched = 0
     for insight in insights:
-        payload = _payload_for_insight(db, insight)
-        generated = _run_async(
-            enrich_insight_payload(payload, fallback=insight.narrative, client=client)
-        )
+        if insight.category == "port_switch":
+            payload = _payload_for_port_switch(insight)
+            generated = _run_async(
+                enrich_port_switch_insight(payload, fallback=insight.narrative, client=client)
+            )
+        else:
+            payload = _payload_for_insight(db, insight)
+            generated = _run_async(
+                enrich_insight_payload(payload, fallback=insight.narrative, client=client)
+            )
         if generated is None:
             continue
         narrative, model = generated
@@ -81,6 +119,32 @@ def enrich_top_insights(db: Session, *, limit: int = 10, client: LLMClient | Non
         enriched += 1
     db.commit()
     return enriched
+
+
+def _payload_for_port_switch(insight: Insight) -> dict[str, Any]:
+    metrics = insight.source_metrics or {}
+    source = metrics.get("source") if isinstance(metrics.get("source"), dict) else {}
+    recommendation = (
+        metrics.get("recommendation") if isinstance(metrics.get("recommendation"), dict) else {}
+    )
+    source_projection = _float_or_none(source.get("projection_7d"))
+    sub_projection = _float_or_none(recommendation.get("projection_7d"))
+    savings = None
+    if source_projection is not None and sub_projection is not None:
+        savings = source_projection - sub_projection
+    return {
+        "source_name": source.get("entity_name"),
+        "source_calls": _float_or_none(source.get("latest_vessel_calls")),
+        "source_slope_pct": _float_or_none(source.get("slope_7d_pct")),
+        "source_z": _float_or_none(source.get("z_score_30d")),
+        "source_projection": source_projection,
+        "sub_name": recommendation.get("entity_name"),
+        "sub_calls": _float_or_none(recommendation.get("latest_vessel_calls")),
+        "sub_projection": sub_projection,
+        "savings_calls": savings,
+        "caveats": metrics.get("caveats") or [],
+        "template_narrative": insight.narrative,
+    }
 
 
 def _payload_for_insight(db: Session, insight: Insight) -> dict[str, Any]:

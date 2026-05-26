@@ -22,6 +22,9 @@ from app.analysis.maritime_risk import (
     compute_maritime_risk_scores,
 )
 from app.analysis.port_congestion import compute_port_congestion as compute_port_congestion_job
+from app.analysis.port_switch import (
+    generate_port_switch_insights as generate_port_switch_insights_job,
+)
 from app.analysis.vessel_monitoring import detect_watchlist_vessel_anomalies
 from app.collectors.aisstream import AISStreamCollector
 from app.collectors.base import BaseCollector
@@ -174,6 +177,12 @@ def generate_forecast() -> int:
 def generate_insights() -> int:
     with SessionLocal() as db:
         return generate_insights_job(db)
+
+
+@celery_app.task(name="generate_port_switch_insights")
+def generate_port_switch_insights() -> int:
+    with SessionLocal() as db:
+        return generate_port_switch_insights_job(db)
 
 
 @celery_app.task(name="compute_maritime_risk")

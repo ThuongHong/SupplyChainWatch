@@ -48,5 +48,14 @@ def build_anomaly_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     return system_prompt, _json_prompt("Explain possible factors for this anomaly.", payload)
 
 
+def build_port_switch_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    system_prompt = (
+        f"{BASE_SAFETY} Write one paragraph for a shipping or logistics operator. "
+        "State the switch-port action, the pressure signal, and the caveat in plain "
+        "language. Do not include bullets. Do not use numbers absent from the input."
+    )
+    return system_prompt, _json_prompt("Write a switch-port recommendation narrative.", payload)
+
+
 def _json_prompt(instruction: str, payload: dict[str, Any]) -> str:
     return f"{instruction}\nInput JSON:\n{json.dumps(payload, sort_keys=True, default=str)}"

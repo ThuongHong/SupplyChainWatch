@@ -161,6 +161,33 @@ export interface PortComparisonItem {
   value: number;
 }
 
+
+export interface PortPressureItem {
+  entity_id: string;
+  entity_name: string;
+  port_id?: number | null;
+  asof: string;
+  latest_vessel_calls?: number | null;
+  latest_anomaly_index?: number | null;
+  slope_7d_pct?: number | null;
+  slope_30d_pct?: number | null;
+  baseline_60d_mean?: number | null;
+  z_score_30d?: number | null;
+  anomaly_flag: boolean;
+  projection_7d?: number | null;
+  freshness_status: string;
+}
+
+export interface SwitchRecommendationResponse {
+  source: PortPressureItem;
+  substitutes: PortPressureItem[];
+  recommendation?: PortPressureItem | null;
+  headline: string;
+  reason?: string | null;
+  generated_at: string;
+  caveats: string[];
+}
+
 export interface ChokepointResponse {
   id: number;
   name: string;
@@ -461,6 +488,8 @@ export const apiClient = {
   portCongestion: (init?: RequestInit) => request<PortCongestionResponse[]>("/api/ports/congestion", init),
   portTimeline: (portId: number, days = 30, init?: RequestInit) =>
     request<PortCongestionResponse[]>(`/api/ports/${portId}/timeline${queryString({ days })}`, init),
+  getPortSwitchRecommendation: (portId: number, init?: RequestInit) =>
+    request<SwitchRecommendationResponse>(`/api/ports/${portId}/switch_recommendation`, init),
   portActivity: (params: { port_id?: number; days?: number; limit?: number } = {}, init?: RequestInit) =>
     request<PortActivityItem[]>(`/api/ports/activity${queryString(params)}`, init),
   portComparison: (params: { days?: number; metric?: string } = {}, init?: RequestInit) =>

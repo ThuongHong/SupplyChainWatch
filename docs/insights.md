@@ -91,6 +91,22 @@ These are the six report-grade insights the project is designed to verify. Curre
 
 **Current status:** Verified baseline forecast availability. Running `generate_forecasts()` on 2026-05-23 created 3 rows: `BDI` last actual 2991.0 with MAPE 3.08%, `FBX_GLOBAL` last actual 2000.0 with MAPE 14.73%, and `WCI_GLOBAL` last actual 2712.0 with MAPE 10.21%. These are moving-average baselines and should be described as directional, not predictive-grade ML.
 
+## 7. Switch-Port Recommendation
+
+**Hypothesis:** When a monitored port shows rising pressure, a same-region substitute with lower projected pressure can give operators a concrete next step.
+
+**Evidence to collect:**
+- `portwatch_metrics` daily `portcalls` / `daily_vessel_calls` by monitored port.
+- 7-day and 30-day linear slope.
+- 30-day rolling z-score and 60-day baseline.
+- Same-region port reference metadata and TEU capacity band.
+
+**Method:** Compute the source port pressure from the latest 60 days, project 7 days using persistence plus linear slope, then rank same-region substitutes within the +/-50% TEU band by lower projected vessel-call pressure.
+
+**Expected output:** `/api/ports/{port_id}/switch_recommendation`, daily `port_switch` insights, and a Ports page Switch-Port Brief with the recommended substitute and estimated calls/day pressure reduction.
+
+**Current status:** Implemented as an operator recommendation layer over PortWatch time series. The method is intentionally bounded: PortWatch history supports trend and rolling z-score, not seasonality or year-over-year claims; the 7-day projection is not ML; substitutes are limited to monitored PortWatch ports; AIS-derived tables are not used.
+
 ## Current Implementation Status
 
 | Insight | Backend support | Frontend support | Current status |
@@ -101,6 +117,7 @@ These are the six report-grade insights the project is designed to verify. Curre
 | Port anomaly cluster | Anomaly detector + explainer | Anomaly timeline | Verified data availability |
 | Freight co-movement | Correlation API | Heatmap | Partial: overlap still thin |
 | Forecast reliability | Forecast job + MAPE | Forecast charts | Verified baseline forecasts |
+| Switch-port recommendation | PortWatch pressure + recommendation API + daily insight task | Ports Switch-Port Brief | Implemented: bounded PortWatch trend recommendation |
 
 ## Current Database Snapshot
 

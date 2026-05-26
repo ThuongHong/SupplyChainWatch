@@ -17,6 +17,9 @@ class FakeMappings:
     def all(self) -> list[dict[str, object]]:
         return self.rows
 
+    def first(self) -> dict[str, object] | None:
+        return self.rows[0] if self.rows else None
+
 
 class FakeResult:
     def __init__(self, rows: list[dict[str, object]]) -> None:
@@ -121,6 +124,7 @@ def test_openapi_exposes_week2_routes() -> None:
     assert "/api/risk/watchlist/{mmsi}/enrichment" in paths
     assert "/api/risk/watchlist/{mmsi}/anomalies" in paths
     assert "/api/risk/watchlist/{mmsi}/eta-drift" in paths
+    assert "/api/ports/{port_id}/switch_recommendation" in paths
 
 
 def test_latest_insights_returns_risk_story_fields() -> None:
@@ -224,6 +228,81 @@ def test_port_comparison_endpoint() -> None:
     assert payload[0]["port_name"] == "Singapore"
     assert payload[0]["value"] == 120.0
 
+
+
+def test_get_switch_recommendation_contract(monkeypatch: object) -> None:
+    from app.analysis.port_switch import PortPressure, SwitchRecommendation
+    from app.api.routes.ports import get_port_switch_recommendation
+
+    class FakeSwitchDb:
+        async def execute(self, statement: object, params: dict[str, object]) -> FakeResult:
+            assert params == {"port_id": 10}
+            return FakeResult([{"locode": "CNSHA"}])
+
+        async def run_sync(self, fn: object) -> SwitchRecommendation:
+            return fn(self)  # type: ignore[misc]
+
+    now = datetime(2026, 5, 23, tzinfo=UTC)
+    source = PortPressure(
+        entity_id="port-cnsha",
+        entity_name="Shanghai",
+        port_id=10,
+        asof=now,
+        latest_vessel_calls=159.0,
+        latest_anomaly_index=2.8,
+        slope_7d_pct=4.5,
+        slope_30d_pct=4.8,
+        baseline_60d_mean=129.5,
+        z_score_30d=1.8,
+        anomaly_flag=False,
+        projection_7d=166.0,
+        freshness_status="fresh",
+    )
+    substitute = PortPressure(
+        entity_id="port-cnngb",
+        entity_name="Ningbo-Zhoushan",
+        port_id=20,
+        asof=now,
+        latest_vessel_calls=80.0,
+        latest_anomaly_index=0.2,
+        slope_7d_pct=0.0,
+        slope_30d_pct=0.0,
+        baseline_60d_mean=80.0,
+        z_score_30d=None,
+        anomaly_flag=False,
+        projection_7d=80.0,
+        freshness_status="fresh",
+    )
+    rec = SwitchRecommendation(
+        source=source,
+        substitutes=[substitute],
+        recommendation=substitute,
+        headline="Pressure at Shanghai: consider Ningbo-Zhoushan.",
+        reason=None,
+        generated_at=now,
+    )
+
+    async def fake_get_cached_json(key: str) -> object | None:
+        assert key == "port_switch:10"
+        return None
+
+    async def fake_set_cached_json(key: str, value: object, ttl_seconds: int = 60) -> None:
+        assert key == "port_switch:10"
+        assert ttl_seconds == 60
+
+    monkeypatch.setattr("app.api.routes.ports.get_cached_json", fake_get_cached_json)
+    monkeypatch.setattr("app.api.routes.ports.set_cached_json", fake_set_cached_json)
+    monkeypatch.setattr("app.api.routes.ports.recommend_switch", lambda db, entity_id: rec)
+
+    payload = asyncio.run(
+        get_port_switch_recommendation(10, FakeSwitchDb())  # type: ignore[arg-type]
+    )
+
+    assert payload["source"]["entity_id"] == "port-cnsha"
+    assert payload["recommendation"]["entity_id"] == "port-cnngb"
+    assert payload["substitutes"][0]["projection_7d"] == 80.0
+    assert payload["headline"] == "Pressure at Shanghai: consider Ningbo-Zhoushan."
+    assert payload["caveats"]
 
 def test_portwatch_demo_rows_are_filtered_from_port_api_queries() -> None:
     from app.api.routes import ports

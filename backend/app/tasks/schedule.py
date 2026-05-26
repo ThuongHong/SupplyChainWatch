@@ -59,4 +59,8 @@ beat_schedule = {
         "task": "enrich_watchlist",
         "schedule": crontab(hour=6, minute=30),
     },
+    "generate-port-switch-insights-daily": {
+        "task": "generate_port_switch_insights",
+        "schedule": crontab(hour=6, minute=45),
+    },
 }

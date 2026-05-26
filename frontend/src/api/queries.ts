@@ -1,4 +1,5 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, useQuery } from '@tanstack/react-query'
+import { apiClient } from './client'
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,10 +42,20 @@ export const queryKeys = {
   watchedVesselAnomalies: (mmsi: number) => ['risk', 'watchlist', mmsi, 'anomalies'] as const,
   watchedVesselEtaDrift: (mmsi: number) => ['risk', 'watchlist', mmsi, 'eta-drift'] as const,
   portTimeline: (portId: number, days: number) => ['ports', portId, 'timeline', days] as const,
+  portSwitch: (portId: number) => ['ports', portId, 'switch-recommendation'] as const,
   portActivity: (portId?: number, days = 30) => ['ports', portId ?? 0, 'activity', days] as const,
   portComparison: (days = 30, metric = 'vessel_count') => ['ports', 'comparison', days, metric] as const,
   anomalies: (days: number, severity?: string, portId?: number, limit?: number) => ['anomalies', days, severity ?? 'all', portId ?? 0, limit ?? 0] as const,
   insights: (limit: number) => ['insights', 'latest', limit] as const,
   correlations: (indices: string, days: number) => ['correlations', indices, days] as const,
   story: (pair: string) => ['story', pair] as const,
+}
+
+export function useSwitchRecommendation(portId: number | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: portId ? queryKeys.portSwitch(portId) : ['ports', 'switch-recommendation', 'none'],
+    queryFn: ({ signal }) => apiClient.getPortSwitchRecommendation(portId!, { signal }),
+    enabled: Boolean(portId && enabled),
+    retry: false,
+  })
 }

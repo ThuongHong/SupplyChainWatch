@@ -8,9 +8,10 @@ import {
   type RiskEntityHistoryResponse,
   type RiskStoryEventResponse,
   type AnomalyResponse,
+  type SwitchRecommendationResponse,
 } from '../api/client'
 import { ENABLE_DEMO_FALLBACK } from '../api/config'
-import { queryKeys } from '../api/queries'
+import { queryKeys, useSwitchRecommendation } from '../api/queries'
 import {
   buildPortViewModels,
   formatDateTime,
@@ -493,6 +494,96 @@ const PortDetail: React.FC<{
   )
 }
 
+
+function switchBadgeVariant(rec?: SwitchRecommendationResponse): 'danger' | 'warning' | 'success' {
+  const z = Math.abs(rec?.source.z_score_30d ?? 0)
+  if (z >= 3) return 'danger'
+  if (z >= 2) return 'warning'
+  return 'success'
+}
+
+function compactMetric(value?: number | null, suffix = ''): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a'
+  return `${Math.round(value)}${suffix}`
+}
+
+const SwitchPortBrief: React.FC<{ port: PortViewModel; demo: boolean }> = ({ port, demo }) => {
+  const recommendationQuery = useSwitchRecommendation(port.id, !demo)
+  const timelineQuery = useQuery({
+    queryKey: queryKeys.portTimeline(port.id, 30),
+    queryFn: ({ signal }) => apiClient.portTimeline(port.id, 30, { signal }),
+    enabled: !demo,
+    retry: false,
+  })
+  const rec = recommendationQuery.data
+  const values = timelineValues(timelineQuery.data ?? [], port.id, demo)
+  const sourceProjection = rec?.source.projection_7d ?? null
+
+  return (
+    <Card style={{ padding: 14, minHeight: 178 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-primary)' }}>{port.name} · Switch-Port Brief</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{port.region ?? 'Unclassified'} · {port.locode ?? 'No LOCODE'}</div>
+        </div>
+        {rec ? (
+          <Badge variant={switchBadgeVariant(rec)}>
+            z {rec.source.z_score_30d?.toFixed(1) ?? 'n/a'}
+          </Badge>
+        ) : (
+          <Badge variant="warning">{recommendationQuery.isLoading ? 'Loading' : 'No signal'}</Badge>
+        )}
+      </div>
+
+      {rec ? (
+        <>
+          <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)', minHeight: 38 }}>
+            {rec.recommendation ? rec.headline : rec.reason}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 88px', gap: 12, alignItems: 'end', marginTop: 12 }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: 'var(--text-secondary)' }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <th style={{ textAlign: 'left', fontWeight: 500, padding: '0 0 5px' }}>Substitute</th>
+                    <th style={{ textAlign: 'right', fontWeight: 500, padding: '0 0 5px' }}>Proj.</th>
+                    <th style={{ textAlign: 'right', fontWeight: 500, padding: '0 0 5px' }}>Delta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rec.substitutes.slice(0, 2).map(sub => {
+                    const delta = sourceProjection != null && sub.projection_7d != null
+                      ? sourceProjection - sub.projection_7d
+                      : null
+                    return (
+                      <tr key={sub.entity_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '6px 0', color: sub.entity_id === rec.recommendation?.entity_id ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: sub.entity_id === rec.recommendation?.entity_id ? 650 : 500 }}>{sub.entity_name}</td>
+                        <td className="mono-num" style={{ padding: '6px 0', textAlign: 'right' }}>{compactMetric(sub.projection_7d)}</td>
+                        <td className="mono-num" style={{ padding: '6px 0', textAlign: 'right', color: delta != null && delta > 0 ? 'var(--success)' : 'var(--text-muted)' }}>{compactMetric(delta)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              {rec.substitutes.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>No monitored substitute in the same region.</div>}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+              <Sparkline data={values} color={severityColor[port.severity]} width={82} height={38} />
+              <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{compactMetric(rec.source.slope_7d_pct, '%')} wk</div>
+            </div>
+          </div>
+        </>
+      ) : recommendationQuery.isError ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+          Switch recommendation unavailable for this monitored port.
+        </div>
+      ) : (
+        <SkeletonBlock height={94} lines={3} />
+      )}
+    </Card>
+  )
+}
+
 export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNavigate }) => {
   const [region, setRegion] = useState<Region>('All')
   const [selectedPort, setSelectedPort] = useState<PortViewModel | null>(null)
@@ -565,6 +656,12 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
   const highCount = ports.filter(port => port.severity === 'high').length
   const medCount = ports.filter(port => port.severity === 'medium').length
   const totalVessels = ports.reduce((sum, port) => sum + (port.congestion?.total_in_area ?? 0), 0)
+  const topSwitchPorts = useMemo(
+    () => [...ports]
+      .sort((a, b) => (b.congestion?.total_in_area ?? 0) - (a.congestion?.total_in_area ?? 0))
+      .slice(0, 3),
+    [ports],
+  )
 
   const selectedPortAnomaly = useMemo(() => {
     if (!selectedPort) return undefined
@@ -585,6 +682,22 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
           <MetricCard label="Watchlist Ports" value={medCount} tone={medCount ? 'warning' : 'success'} />
           <MetricCard label="Vessels In Areas" value={fmtNum(totalVessels)} tone="info" />
         </div>
+
+
+
+        {!usingDemo && topSwitchPorts.length > 0 && (
+          <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <SectionHeader
+              title="Switch-Port Brief"
+              sub="Top congested monitored ports, ranked by projected PortWatch pressure"
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+              {topSwitchPorts.map(port => (
+                <SwitchPortBrief key={port.id} port={port} demo={usingDemo} />
+              ))}
+            </div>
+          </section>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 14 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
