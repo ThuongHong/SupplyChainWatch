@@ -5,11 +5,12 @@ import { ChatbotWidget } from './components/ChatbotWidget'
 import { Dashboard } from './pages/Dashboard'
 import { MacroIndices } from './pages/MacroIndices'
 import { Ports } from './pages/Ports'
+import { Chokepoints } from './pages/Chokepoints'
 
 const VesselMap = lazy(() => import('./pages/VesselMap').then(module => ({ default: module.VesselMap })))
 const Analytics = lazy(() => import('./pages/Analytics').then(module => ({ default: module.Analytics })))
 
-const PAGE_IDS: PageId[] = ['dashboard', 'indices', 'vessels', 'ports', 'analytics']
+const PAGE_IDS: PageId[] = ['dashboard', 'indices', 'vessels', 'ports', 'chokepoints', 'analytics']
 
 function pageFromHash(): PageId {
   const hash = window.location.hash.replace('#/', '').replace('#', '')
@@ -66,7 +67,9 @@ export default function App() {
         ? VesselMap
         : page === 'ports'
           ? Ports
-          : Analytics
+          : page === 'chokepoints'
+            ? Chokepoints
+            : Analytics
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>

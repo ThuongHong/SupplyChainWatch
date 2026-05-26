@@ -74,7 +74,13 @@ async def latest_insights(
 ) -> list[dict[str, object]]:
     result = await db.execute(
         text("""
-            WITH ranked AS (
+            WITH current_port_risk AS (
+                SELECT DISTINCT ON (entity_id)
+                       entity_id, score, severity, time
+                FROM port_risk_scores
+                ORDER BY entity_id, time DESC
+            ),
+            ranked AS (
                 SELECT id, generated_at, category, title, narrative, narrative_llm,
                        narrative_model, narrative_generated_at, metrics, priority,
                        event_type, confidence, affected_entities, source_metrics,
@@ -83,7 +89,19 @@ async def latest_insights(
                            PARTITION BY COALESCE(category, ''), title
                            ORDER BY generated_at DESC, id DESC
                        ) AS duplicate_rank
-                FROM insights
+                FROM insights i
+                LEFT JOIN current_port_risk cpr
+                  ON i.category = 'port_risk'
+                 AND cpr.entity_id = i.affected_entities->0->>'id'
+                WHERE NOT (
+                    i.category = 'port_risk'
+                    AND i.event_type = 'port_risk_elevated'
+                    AND (
+                        cpr.entity_id IS NULL
+                        OR cpr.score < 60
+                        OR cpr.severity = 'low'
+                    )
+                )
             )
             SELECT id, generated_at, category, title, narrative, narrative_llm,
                    narrative_model, narrative_generated_at, metrics, priority,
@@ -91,6 +109,7 @@ async def latest_insights(
                    attention_level
             FROM ranked
             WHERE duplicate_rank = 1
+              AND generated_at >= NOW() - INTERVAL '7 days'
             ORDER BY priority DESC, generated_at DESC, id DESC
             LIMIT :limit
             """),

@@ -59,12 +59,28 @@ describe('real data default page behavior', () => {
     expect(client).toMatch(/syncTaskStatus/)
     expect(header).toMatch(/apiClient\.syncTaskStatus/)
     expect(header).toMatch(/Queue failed/)
-    expect(header).toMatch(/Worker still running/)
+    expect(header).toMatch(/Background sync queued/)
     expect(header).toMatch(/ACTIVE_SYNC_TASK_KEY/)
     expect(header).toMatch(/localStorage\.setItem\(ACTIVE_SYNC_TASK_KEY/)
     expect(header).toMatch(/localStorage\.getItem\(ACTIVE_SYNC_TASK_KEY/)
     expect(header).toMatch(/localStorage\.removeItem\(ACTIVE_SYNC_TASK_KEY/)
     expect(header).not.toMatch(/setTimeout\(\(\) => \{\s*queryClient\.invalidateQueries\(\)\s*setIsSyncing\(false\)/)
+  })
+
+  it('releases the force fetch button quickly when the worker is still running', () => {
+    const header = readComponent('layout/Header.tsx')
+
+    expect(header).toMatch(/const SYNC_MAX_POLLS = 6/)
+    expect(header).toMatch(/clearActiveSyncTask\(\)\s+await queryClient\.invalidateQueries\(\)\s+await finishSyncState\('Background sync queued', 1800\)/)
+  })
+
+  it('bounds force fetch API calls with request timeouts', () => {
+    const header = readComponent('layout/Header.tsx')
+
+    expect(header).toMatch(/const SYNC_REQUEST_TIMEOUT_MS = 8_000/)
+    expect(header).toMatch(/withTimeoutSignal\(SYNC_REQUEST_TIMEOUT_MS\)/)
+    expect(header).toMatch(/apiClient\.forceSync\(\{ signal: timeout\.signal \}\)/)
+    expect(header).toMatch(/apiClient\.syncTaskStatus\(taskId, \{ signal: timeout\.signal \}\)/)
   })
 
   it('uses the GlobalSupplyWatch browser favicon instead of the Vite default', () => {

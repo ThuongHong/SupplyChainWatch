@@ -154,6 +154,9 @@ def test_latest_insights_returns_risk_story_fields() -> None:
 
     assert db.params == {"limit": 5}
     assert "ROW_NUMBER() OVER" in db.statement
+    assert "current_port_risk" in db.statement
+    assert "port_risk_elevated" in db.statement
+    assert "cpr.score < 60" in db.statement
     assert "WHERE duplicate_rank = 1" in db.statement
     assert "event_type, confidence, affected_entities" in db.statement
     assert payload[0]["event_type"] == "risk_worsening"
@@ -222,12 +225,13 @@ def test_port_comparison_endpoint() -> None:
         }
     ]
     db = FakeInsightsDb(rows)
-    payload = asyncio.run(port_comparison(db, days=30, metric="vessel_count"))  # type: ignore[arg-type]
+    payload = asyncio.run(
+        port_comparison(db, days=30, metric="vessel_count")  # type: ignore[arg-type]
+    )
 
     assert len(payload) == 1
     assert payload[0]["port_name"] == "Singapore"
     assert payload[0]["value"] == 120.0
-
 
 
 def test_get_switch_recommendation_contract(monkeypatch: object) -> None:
@@ -304,6 +308,7 @@ def test_get_switch_recommendation_contract(monkeypatch: object) -> None:
     assert payload["headline"] == "Pressure at Shanghai: consider Ningbo-Zhoushan."
     assert payload["caveats"]
 
+
 def test_portwatch_demo_rows_are_filtered_from_port_api_queries() -> None:
     from app.api.routes import ports
 
@@ -317,6 +322,16 @@ def test_portwatch_demo_rows_are_filtered_from_port_api_queries() -> None:
     for function in checked_functions:
         source = inspect.getsource(function)
         assert "portwatch_demo" in source
+
+
+def test_port_risk_insight_generation_clears_stale_elevated_rows() -> None:
+    from app.analysis import maritime_risk
+
+    source = inspect.getsource(maritime_risk.generate_risk_insights)
+
+    assert "DELETE FROM insights" in source
+    assert "category = 'port_risk'" in source
+    assert "event_type = 'port_risk_elevated'" in source
 
 
 def test_portwatch_demo_rows_are_filtered_from_port_anomaly_queries() -> None:

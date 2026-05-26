@@ -18,7 +18,7 @@ const catConfig = {
   forecast: { color: 'var(--chart-4)', bg: 'var(--warning-muted)', Icon: Icons.Target, label: 'Forecast' },
   risk_story: { color: 'var(--accent)', bg: 'var(--accent-muted)', Icon: Icons.Activity, label: 'Risk Story' },
   data_quality: { color: 'var(--info)', bg: 'var(--info-muted)', Icon: Icons.Info, label: 'Data Quality' },
-  port_risk: { color: 'var(--danger)', bg: 'var(--danger-muted)', Icon: Icons.Anchor, label: 'Traffic Anomaly' },
+  port_risk: { color: 'var(--danger)', bg: 'var(--danger-muted)', Icon: Icons.Anchor, label: 'Port Risk' },
 }
 
 interface InsightRowProps {

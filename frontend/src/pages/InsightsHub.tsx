@@ -54,7 +54,7 @@ type FeedInsight = {
 }
 
 const CATS: CatFilter[] = ['all', 'port_risk', 'risk_story', 'data_quality', 'correlation', 'trend', 'anomaly', 'forecast']
-const CAT_LABELS: Record<CatFilter, string> = { all: 'All', port_risk: 'Traffic Anomaly', risk_story: 'Risk Story', data_quality: 'Data Quality', correlation: 'Correlation', trend: 'Trend', anomaly: 'Anomaly', forecast: 'Forecast' }
+const CAT_LABELS: Record<CatFilter, string> = { all: 'All', port_risk: 'Port Risk', risk_story: 'Risk Story', data_quality: 'Data Quality', correlation: 'Correlation', trend: 'Trend', anomaly: 'Anomaly', forecast: 'Forecast' }
 
 const DEMO_INSIGHTS: FeedInsight[] = [
   { title: 'Demo trend', text: 'BDI surged over several sessions, a pattern to verify against live freight_indices data.', category: 'trend', time: 'demo', aiGenerated: false },

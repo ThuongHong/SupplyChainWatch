@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useQuery, useIsFetching, useQueryClient } from '@tanstack/react-query'
-import { apiClient, API_BASE_URL } from '../../api/client'
+import { apiClient, API_BASE_URL, type SyncTaskStatus } from '../../api/client'
 import { queryKeys } from '../../api/queries'
 import { Icons } from '../icons'
 import { StatusDot } from '../StatusDot'
@@ -11,14 +11,25 @@ const PAGE_META: Record<PageId, { parent: string; title: string }> = {
   indices: { parent: 'Macro Trends', title: 'Freight & Indices' },
   vessels: { parent: 'Micro Causes', title: 'Live Vessel Map' },
   ports: { parent: 'Micro Causes', title: 'Port Congestion' },
+  chokepoints: { parent: 'Micro Causes', title: 'Chokepoints' },
   analytics: { parent: 'Intelligence', title: 'Exploratory Analysis' },
 }
 
 const SYNC_POLL_INTERVAL_MS = 2_000
-const SYNC_MAX_POLLS = 15
+const SYNC_MAX_POLLS = 6
+const SYNC_REQUEST_TIMEOUT_MS = 8_000
 const ACTIVE_SYNC_TASK_KEY = 'gsw-active-sync-task-id'
 
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
+
+const withTimeoutSignal = (timeoutMs: number) => {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+  return {
+    signal: controller.signal,
+    clear: () => window.clearTimeout(timeoutId),
+  }
+}
 
 interface HeaderProps {
   theme: 'dark' | 'light'
@@ -48,18 +59,22 @@ export const Header: React.FC<HeaderProps> = ({ theme, onThemeToggle, page }) =>
     setSyncStatus(message)
     await wait(delayMs)
     if (mounted.current) {
-      setIsSyncing(false)
       setSyncStatus(null)
     }
   }
 
   const pollSyncTask = async (taskId: string) => {
     pollingTaskId.current = taskId
-    setIsSyncing(true)
     setSyncStatus(`Queued ${taskId.slice(0, 8)}`)
     try {
       for (let attempt = 0; attempt < SYNC_MAX_POLLS; attempt += 1) {
-        const task = await apiClient.syncTaskStatus(taskId)
+        const timeout = withTimeoutSignal(SYNC_REQUEST_TIMEOUT_MS)
+        let task: SyncTaskStatus
+        try {
+          task = await apiClient.syncTaskStatus(taskId, { signal: timeout.signal })
+        } finally {
+          timeout.clear()
+        }
         if (!mounted.current || pollingTaskId.current !== taskId) return
         if (task.successful) {
           clearActiveSyncTask()
@@ -75,12 +90,13 @@ export const Header: React.FC<HeaderProps> = ({ theme, onThemeToggle, page }) =>
         setSyncStatus(task.status === 'started' ? 'Sync running...' : 'Queued...')
         await wait(SYNC_POLL_INTERVAL_MS)
       }
+      clearActiveSyncTask()
       await queryClient.invalidateQueries()
-      await finishSyncState('Worker still running', 3600)
+      await finishSyncState('Background sync queued', 1800)
     } catch (err) {
       console.error(err)
       clearActiveSyncTask()
-      await finishSyncState('Queue failed', 3600)
+      await finishSyncState('Sync status unavailable', 3600)
     }
   }
 
@@ -106,12 +122,20 @@ export const Header: React.FC<HeaderProps> = ({ theme, onThemeToggle, page }) =>
     setIsSyncing(true)
     setSyncStatus('Queued...')
     try {
-      const queued = await apiClient.forceSync()
+      const timeout = withTimeoutSignal(SYNC_REQUEST_TIMEOUT_MS)
+      let queued: { status: string; task_id: string }
+      try {
+        queued = await apiClient.forceSync({ signal: timeout.signal })
+      } finally {
+        timeout.clear()
+      }
       localStorage.setItem(ACTIVE_SYNC_TASK_KEY, queued.task_id)
-      await pollSyncTask(queued.task_id)
+      setIsSyncing(false)
+      void pollSyncTask(queued.task_id)
     } catch (err) {
       console.error(err)
       clearActiveSyncTask()
+      setIsSyncing(false)
       await finishSyncState('Queue failed', 3600)
     }
   }
@@ -130,7 +154,7 @@ export const Header: React.FC<HeaderProps> = ({ theme, onThemeToggle, page }) =>
           disabled={isSyncing}
         >
           <Icons.RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
-          <span>{isSyncing ? (syncStatus || 'Syncing...') : 'Force Fetch'}</span>
+          <span>{isSyncing ? (syncStatus || 'Queueing...') : 'Force Fetch'}</span>
         </button>
         <div className={`status-pill status-pill--${status}`}>
           <StatusDot status={status} pulse={status !== 'danger'} size={6} />

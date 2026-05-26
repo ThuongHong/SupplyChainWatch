@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -63,11 +64,30 @@ PORTWATCH_SOURCE_ID_TO_ENTITY = {
 }
 
 
+@dataclass(frozen=True)
+class ArcGisLayerMetadata:
+    fields: tuple[str, ...]
+    object_id_field: str
+    max_record_count: int
+    supports_pagination: bool
+    supports_order_by: bool
+    date_fields_time_reference: dict[str, Any] | None
+
+    def field_name(self, candidate: str) -> str:
+        """Return the layer's exact field spelling when present."""
+        lowered = candidate.lower()
+        for field in self.fields:
+            if field.lower() == lowered:
+                return field
+        return candidate
+
+
 class PortWatchFeatureAdapter:
     """ArcGIS FeatureServer adapter for PortWatch-style layers."""
 
     def __init__(self, collector: BaseCollector[PortWatchMetricRecord]) -> None:
         self.collector = collector
+        self._metadata_by_url: dict[str, ArcGisLayerMetadata] = {}
 
     def fetch_features(self, url: str) -> list[dict[str, Any]]:
         """Fetch recent data for monitored portwatch entities."""
@@ -75,17 +95,21 @@ class PortWatchFeatureAdapter:
             is_ports = "Daily_Ports_Data" in url or "ports" in url.lower()
             is_chokepoints = "Daily_Chokepoints_Data" in url or "chokepoint" in url.lower()
             if is_ports or is_chokepoints:
+                metadata = self._layer_metadata(url)
                 ids = PORTWATCH_TARGET_PORTIDS if is_ports else PORTSTRAITWATCH_TARGET_PORTIDS
                 history_days = max(1, int(getattr(self.collector, "history_days", 90)))
                 since_date = (datetime.now(UTC) - timedelta(days=history_days)).strftime("%Y-%m-%d")
                 ids_str = ", ".join(f"'{i}'" for i in ids)
-                where_clause = f"portid IN ({ids_str}) AND date >= '{since_date}'"
+                port_id_field = metadata.field_name("portid")
+                date_field = metadata.field_name("date")
+                where_clause = f"{port_id_field} IN ({ids_str}) AND {date_field} >= '{since_date}'"
                 try:
                     features = self._fetch_filtered_pages(url, where_clause)
                     if features:
                         return features
                 except Exception as e:
                     import structlog
+
                     structlog.get_logger(__name__).warning(
                         "portwatch_bulk_query_failed_falling_back_to_individual",
                         error=str(e),
@@ -93,7 +117,9 @@ class PortWatchFeatureAdapter:
                     )
                     features = []
                     for entity_id in ids:
-                        individual_clause = f"portid = '{entity_id}' AND date >= '{since_date}'"
+                        individual_clause = (
+                            f"{port_id_field} = '{entity_id}' AND {date_field} >= '{since_date}'"
+                        )
                         try:
                             port_features = self._fetch_filtered_pages(url, individual_clause)
                             if port_features:
@@ -113,28 +139,75 @@ class PortWatchFeatureAdapter:
             return self._fetch_object_ids(url, object_ids)
         return self._fetch_first_page(url)
 
+    def _layer_metadata(self, url: str) -> ArcGisLayerMetadata:
+        if url in self._metadata_by_url:
+            return self._metadata_by_url[url]
+        payload = self.collector.request_json("GET", _layer_metadata_url(url), params={"f": "json"})
+        if not isinstance(payload, dict):
+            raise CollectorError("PortWatch layer metadata response was not a JSON object")
+        _raise_arcgis_error(payload)
+        fields = tuple(
+            str(field["name"])
+            for field in payload.get("fields", [])
+            if isinstance(field, dict) and field.get("name")
+        )
+        advanced = payload.get("advancedQueryCapabilities")
+        if not isinstance(advanced, dict):
+            advanced = {}
+        unique_id = payload.get("uniqueIdField")
+        if not isinstance(unique_id, dict):
+            unique_id = {}
+        metadata = ArcGisLayerMetadata(
+            fields=fields,
+            object_id_field=str(
+                payload.get("objectIdField")
+                or payload.get("objectIdFieldName")
+                or unique_id.get("name")
+                or "ObjectId"
+            ),
+            max_record_count=_positive_int(payload.get("maxRecordCount"), FEATURE_PAGE_SIZE),
+            supports_pagination=bool(advanced.get("supportsPagination", True)),
+            supports_order_by=bool(advanced.get("supportsOrderBy", True)),
+            date_fields_time_reference=(
+                payload.get("dateFieldsTimeReference")
+                if isinstance(payload.get("dateFieldsTimeReference"), dict)
+                else None
+            ),
+        )
+        self._metadata_by_url[url] = metadata
+        return metadata
+
     def _fetch_filtered_pages(self, url: str, where_clause: str) -> list[dict[str, Any]]:
+        metadata = self._layer_metadata(url)
+        page_size = min(FEATURE_PAGE_SIZE, metadata.max_record_count)
         features: list[dict[str, Any]] = []
         offset = 0
         while True:
-            payload = self.collector.request_json(
-                "GET",
-                url,
-                params={
-                    "where": where_clause,
-                    "outFields": "*",
-                    "f": "json",
-                    "returnGeometry": "false",
-                    "resultOffset": offset,
-                    "resultRecordCount": FEATURE_PAGE_SIZE,
-                },
-            )
-            page = payload.get("features", []) if isinstance(payload, dict) else []
-            if isinstance(page, list):
-                features.extend(item for item in page if isinstance(item, dict))
-            if not isinstance(payload, dict) or not payload.get("exceededTransferLimit"):
+            params: dict[str, Any] = {
+                "where": where_clause,
+                "outFields": "*",
+                "f": "json",
+                "returnGeometry": "false",
+            }
+            if metadata.supports_order_by:
+                params["orderByFields"] = f"{metadata.object_id_field} ASC"
+            if metadata.supports_pagination:
+                params["resultOffset"] = offset
+                params["resultRecordCount"] = page_size
+            payload = self.collector.request_json("GET", url, params=params)
+            _raise_arcgis_error(payload)
+            page = _payload_features(payload)
+            if not page:
                 break
-            offset += FEATURE_PAGE_SIZE
+            features.extend(page)
+            if not metadata.supports_pagination or not isinstance(payload, dict):
+                break
+            if "exceededTransferLimit" in payload:
+                if not payload.get("exceededTransferLimit"):
+                    break
+            elif len(page) < page_size:
+                break
+            offset += page_size
         return features
 
     def _recent_object_ids(self, url: str) -> list[int]:
@@ -165,26 +238,31 @@ class PortWatchFeatureAdapter:
                     "returnGeometry": "false",
                 },
             )
-            page = payload.get("features", []) if isinstance(payload, dict) else []
-            if isinstance(page, list):
-                features.extend(item for item in page if isinstance(item, dict))
+            _raise_arcgis_error(payload)
+            features.extend(_payload_features(payload))
         return features
 
     def _fetch_first_page(self, url: str) -> list[dict[str, Any]]:
+        metadata = self._layer_metadata(url)
+        page_size = min(FEATURE_PAGE_SIZE, metadata.max_record_count)
+        params: dict[str, Any] = {
+            "where": "1=1",
+            "outFields": "*",
+            "f": "json",
+            "returnGeometry": "false",
+        }
+        if metadata.supports_order_by:
+            params["orderByFields"] = f"{metadata.object_id_field} ASC"
+        if metadata.supports_pagination:
+            params["resultOffset"] = 0
+            params["resultRecordCount"] = page_size
         payload = self.collector.request_json(
             "GET",
             url,
-            params={
-                "where": "1=1",
-                "outFields": "*",
-                "f": "json",
-                "returnGeometry": "false",
-                "resultOffset": 0,
-                "resultRecordCount": FEATURE_PAGE_SIZE,
-            },
+            params=params,
         )
-        page = payload.get("features", []) if isinstance(payload, dict) else []
-        return [item for item in page if isinstance(item, dict)] if isinstance(page, list) else []
+        _raise_arcgis_error(payload)
+        return _payload_features(payload)
 
 
 class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
@@ -220,7 +298,11 @@ class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
             except Exception as e:
                 if self.use_demo_fallback or settings.backend_demo_fallback_enabled:
                     import structlog
-                    structlog.get_logger(__name__).warning("portwatch_fetch_failed_using_fallback", error=str(e))
+
+                    structlog.get_logger(__name__).warning(
+                        "portwatch_fetch_failed_using_fallback",
+                        error=str(e),
+                    )
                     return demo_portwatch_rows()
                 raise
             for feature in features:
@@ -255,6 +337,41 @@ class PortWatchCollector(BaseCollector[PortWatchMetricRecord]):
                 aggregated[key] = row_copy
 
         return list(aggregated.values())
+
+
+def _layer_metadata_url(query_url: str) -> str:
+    trimmed = query_url.rstrip("/")
+    if trimmed.lower().endswith("/query"):
+        return trimmed.rsplit("/", 1)[0]
+    return trimmed
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _raise_arcgis_error(payload: Any) -> None:
+    if not isinstance(payload, dict) or "error" not in payload:
+        return
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("details") or error
+    else:
+        message = error
+    raise CollectorError(f"PortWatch ArcGIS error: {message}")
+
+
+def _payload_features(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    page = payload.get("features", [])
+    if not isinstance(page, list):
+        return []
+    return [item for item in page if isinstance(item, dict)]
 
 
 def normalize_feature(
@@ -301,22 +418,23 @@ def normalize_feature(
 
 def demo_portwatch_rows(now: datetime | None = None) -> list[dict[str, Any]]:
     import random
+
     random.seed(42)
     base_date = now or datetime.now(UTC)
     rows: list[dict[str, Any]] = []
-    
+
     # Generate 90 days of daily historical records per entity
     for d in range(90):
         observed_at = base_date - timedelta(days=d)
         for index, entity in enumerate(PORTWATCH_ENTITIES):
             base = 70 + index * 8
-            # Add a bit of random variation to simulate realistic trends and z-score standard deviation
+            # Add variation to simulate realistic trends and z-score standard deviation.
             variation = random.uniform(-4.0, 4.0)
-            
-            # Intentionally inject significant spikes on specific days to trigger z-score anomalies >= 2.0 / 3.0
+
+            # Inject spikes on specific days to trigger z-score anomalies >= 2.0 / 3.0.
             if d in (5, 20):
                 variation += 25.0  # Anomaly spike
-            
+
             metrics = {
                 "daily_vessel_calls": base + variation,
                 "trade_volume_index": max(10.0, 100 - index * 3 - variation * 0.5),
@@ -324,7 +442,7 @@ def demo_portwatch_rows(now: datetime | None = None) -> list[dict[str, Any]]:
             }
             if entity.entity_type != "port":
                 metrics["transit_capacity_index"] = max(10.0, 95 - index * 2 - variation * 0.4)
-                
+
             for metric_name, value in metrics.items():
                 rows.append(
                     {

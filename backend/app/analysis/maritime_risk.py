@@ -234,7 +234,7 @@ def compute_maritime_risk_scores(db: Session) -> int:
             "missing_components": ["portwatch_metrics"],
             "reasons": reasons,
             "source_metrics": {},
-            "freshness_status": freshness_status(as_of),
+            "freshness_status": "empty",
             "as_of": as_of,
         }
         db.add(PortRiskScore(**common))
@@ -299,6 +299,13 @@ def compute_disruption_propagation(db: Session, *, minimum_score: float = 70) ->
 
 
 def generate_risk_insights(db: Session, *, limit: int = 10) -> int:
+    db.execute(
+        text("""
+            DELETE FROM insights
+            WHERE category = 'port_risk'
+              AND event_type = 'port_risk_elevated'
+            """)
+    )
     weather_context = latest_weather_context(db)
     economic_context = latest_economic_context(db)
     result = db.execute(

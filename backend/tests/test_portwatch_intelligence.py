@@ -106,6 +106,25 @@ def test_portwatch_collector_uses_portid_filter() -> None:
     requested_params: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if not str(request.url).split("?")[0].endswith("/query"):
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "objectIdField": "ObjectId",
+                    "maxRecordCount": 1000,
+                    "advancedQueryCapabilities": {
+                        "supportsPagination": True,
+                        "supportsOrderBy": True,
+                    },
+                    "fields": [
+                        {"name": "ObjectId"},
+                        {"name": "date"},
+                        {"name": "portid"},
+                        {"name": "portcalls"},
+                    ],
+                },
+            )
         requested_params.append(dict(request.url.params))
         payload = {
             "features": [
@@ -140,6 +159,60 @@ def test_portwatch_collector_uses_portid_filter() -> None:
     assert "chokepoint4" in requested_params[1]["where"]
     assert "chokepoint5" in requested_params[1]["where"]
     assert "chokepoint28" in requested_params[1]["where"]
+
+
+def test_portwatch_collector_uses_layer_metadata_for_stable_pagination() -> None:
+    requested_query_params: list[dict[str, Any]] = []
+    metadata_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not str(request.url).split("?")[0].endswith("/query"):
+            metadata_paths.append(request.url.path)
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "objectIdField": "ObjectId",
+                    "maxRecordCount": 25,
+                    "advancedQueryCapabilities": {
+                        "supportsPagination": True,
+                        "supportsOrderBy": True,
+                    },
+                    "fields": [
+                        {"name": "ObjectId", "type": "esriFieldTypeOID"},
+                        {"name": "date", "type": "esriFieldTypeDateOnly"},
+                        {"name": "portid", "type": "esriFieldTypeString"},
+                        {"name": "portcalls", "type": "esriFieldTypeInteger"},
+                    ],
+                    "dateFieldsTimeReference": {"timeZone": "UTC"},
+                },
+            )
+
+        requested_query_params.append(dict(request.url.params))
+        payload = {"features": []}
+        if "Daily_Ports_Data" in str(request.url):
+            payload = {
+                "features": [
+                    {
+                        "attributes": {
+                            "portid": "port1201",
+                            "portname": "Singapore",
+                            "date": "2026-05-20",
+                            "portcalls": 120,
+                        }
+                    }
+                ]
+            }
+        return httpx.Response(200, request=request, json=payload)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    records = PortWatchCollector(client=client, use_portid_filter=True).run()
+
+    assert records
+    assert metadata_paths
+    assert requested_query_params[0]["resultRecordCount"] == "25"
+    assert requested_query_params[0]["orderByFields"] == "ObjectId ASC"
 
 
 def test_portwatch_matches_known_source_id_without_display_name() -> None:

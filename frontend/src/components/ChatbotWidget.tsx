@@ -31,6 +31,11 @@ const pageContext: Record<PageId, { title: string; metrics: string[]; queryPrefi
     metrics: ['anchored count', 'moored count', 'total in area', 'average dwell hours', 'median speed', 'port calls'],
     queryPrefixes: ['ports', 'risk', 'anomalies'],
   },
+  chokepoints: {
+    title: 'Chokepoints',
+    metrics: ['risk score', 'vessel count', 'median speed', 'transit congestion'],
+    queryPrefixes: ['chokepoints', 'risk'],
+  },
   analytics: {
     title: 'Exploratory Analysis',
     metrics: ['port activity', 'comparison metric', 'anomaly score', 'correlation', 'baseline', 'z-score'],
@@ -42,7 +47,7 @@ const initialMessages: ChatMessage[] = [
   {
     id: 1,
     role: 'assistant',
-    text: 'Mình đọc tab đang mở và giải thích chỉ số bằng Gemini. Hỏi về BDI, risk score, dwell time, anomaly, forecast, hoặc giá trị đang thấy.',
+    text: 'I read the active tab and explain visible metrics with Gemini. Ask about BDI, risk score, dwell time, anomalies, forecasts, or any value on screen.',
   },
 ]
 
@@ -74,6 +79,7 @@ function buildChatContext(page: PageId, queryClient: QueryClient): ChatAssistant
     }))
 
   return {
+    uiLanguage: 'en',
     tab: activeContext.title,
     visibleMetricTypes: activeContext.metrics,
     cachedQueries,
@@ -173,7 +179,7 @@ export const ChatbotWidget: React.FC<{ page: PageId }> = ({ page }) => {
                 {renderChatText(message.text)}
               </div>
             ))}
-            {loading && <div className="chatbot-widget__message chatbot-widget__message--assistant">Gemini đang phân tích tab này...</div>}
+            {loading && <div className="chatbot-widget__message chatbot-widget__message--assistant">Gemini is analyzing this tab...</div>}
           </div>
           <form
             className="chatbot-widget__composer"
@@ -185,7 +191,7 @@ export const ChatbotWidget: React.FC<{ page: PageId }> = ({ page }) => {
             <input
               value={draft}
               onChange={event => setDraft(event.target.value)}
-              placeholder="Hỏi về chỉ số trên tab này"
+              placeholder="Ask about metrics on this tab"
               aria-label="Ask Gemini about this tab"
             />
             <button className="app-button chatbot-widget__send" type="submit" aria-label="Send chat message" disabled={!draft.trim() || loading}>

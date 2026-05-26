@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 const root = dirname(fileURLToPath(import.meta.url))
 const readPage = (name: string) => readFileSync(join(root, name), 'utf8')
 const readApi = (name: string) => readFileSync(join(root, '..', 'api', name), 'utf8')
+const readStyles = () => readFileSync(join(root, '..', 'styles', 'tokens.css'), 'utf8')
 
 describe('historical storytelling uses real data only', () => {
   it('adds API clients for coverage, history, stories, and entity forecast', () => {
@@ -24,6 +25,40 @@ describe('historical storytelling uses real data only', () => {
     expect(source).toMatch(/forecastDirection/)
     expect(source).toMatch(/Dashboard live synthesis/)
     expect(source).not.toMatch(/demoStory/)
+  })
+
+  it('shows Dashboard decision brief from deterministic frontend synthesis', () => {
+    const source = readPage('Dashboard.tsx')
+
+    expect(source).toMatch(/buildDecisionBrief/)
+    expect(source).toMatch(/Decision Brief/)
+    expect(source).toMatch(/Why it matters/)
+    expect(source).toMatch(/Next actions/)
+    expect(source).not.toMatch(/storyAnalyze/)
+  })
+
+  it('adds on-demand Gemini deep insight without hardcoded demo responses', () => {
+    const dashboard = readPage('Dashboard.tsx')
+    const client = readApi('client.ts')
+    const styles = readStyles()
+
+    expect(client).toMatch(/DeepInsightRequest/)
+    expect(client).toMatch(/DeepInsightResponse/)
+    expect(client).toMatch(/deepInsight/)
+    expect(client).toMatch(/"\/api\/chat\/deep-insight"/)
+    expect(dashboard).toMatch(/Ask Gemini for deeper insight/)
+    expect(dashboard).toMatch(/deepInsightContext/)
+    expect(dashboard).toMatch(/apiClient\.deepInsight/)
+    expect(dashboard).toMatch(/Gemini is analyzing/)
+    expect(dashboard).toMatch(/deepInsight\.signal/)
+    expect(dashboard).toMatch(/deepInsight\.so_what/)
+    expect(dashboard).toMatch(/deepInsight\.next_steps/)
+    expect(dashboard).toMatch(/deepInsight\.caveats/)
+    expect(dashboard).toMatch(/Gemini insight unavailable/)
+    expect(dashboard).not.toMatch(/Demo Gemini/)
+    expect(styles).toMatch(/\.deep-insight-panel/)
+    expect(styles).toMatch(/\.deep-insight-grid/)
+    expect(styles).toMatch(/\.deep-insight-block/)
   })
 
   it('removes hardcoded AI Story Mode from analysis pages', () => {
@@ -98,7 +133,7 @@ describe('historical storytelling uses real data only', () => {
     expect(source).toMatch(/ScatterplotLayer/)
     expect(source).toMatch(/onSelectPort/)
     expect(source).toMatch(/allPortAnomaliesQuery/)
-    expect(insightRowSource).toMatch(/Traffic Anomaly/)
+    expect(insightRowSource).toMatch(/Port Risk/)
     expect(insightRowSource).toMatch(/Risk Story/)
     expect(insightRowSource).toMatch(/Data Quality/)
     expect(source).not.toMatch(/demoRiskStory/)

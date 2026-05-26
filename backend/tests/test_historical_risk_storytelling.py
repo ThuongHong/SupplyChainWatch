@@ -80,6 +80,25 @@ def test_portwatch_collector_paginates_filtered_feature_queries() -> None:
     def handler(request: Any) -> Any:
         import httpx
 
+        if not str(request.url).split("?")[0].endswith("/query"):
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "objectIdField": "ObjectId",
+                    "maxRecordCount": 1000,
+                    "advancedQueryCapabilities": {
+                        "supportsPagination": True,
+                        "supportsOrderBy": True,
+                    },
+                    "fields": [
+                        {"name": "ObjectId"},
+                        {"name": "date"},
+                        {"name": "portid"},
+                        {"name": "portcalls"},
+                    ],
+                },
+            )
         offset = request.url.params.get("resultOffset", "0")
         offsets.append(offset)
         date_value = "2026-05-20" if offset == "0" else "2026-05-21"

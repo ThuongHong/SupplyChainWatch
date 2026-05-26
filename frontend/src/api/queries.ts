@@ -43,6 +43,8 @@ export const queryKeys = {
   watchedVesselEtaDrift: (mmsi: number) => ['risk', 'watchlist', mmsi, 'eta-drift'] as const,
   portTimeline: (portId: number, days: number) => ['ports', portId, 'timeline', days] as const,
   portSwitch: (portId: number) => ['ports', portId, 'switch-recommendation'] as const,
+  chokepoints: ['chokepoints'] as const,
+  chokepointTimeline: (id: number, days: number) => ['chokepoints', id, 'timeline', days] as const,
   portActivity: (portId?: number, days = 30) => ['ports', portId ?? 0, 'activity', days] as const,
   portComparison: (days = 30, metric = 'vessel_count') => ['ports', 'comparison', days, metric] as const,
   anomalies: (days: number, severity?: string, portId?: number, limit?: number) => ['anomalies', days, severity ?? 'all', portId ?? 0, limit ?? 0] as const,

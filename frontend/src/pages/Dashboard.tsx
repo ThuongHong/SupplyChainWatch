@@ -17,6 +17,8 @@ import {
 import { MOCK, fmtNum, fmtPct } from '../data/mock'
 import {
   apiClient,
+  isApiError,
+  type DeepInsightResponse,
   type DisruptionPropagationResponse,
   type EntityRiskForecastResponse,
   type InsightResponse,
@@ -44,6 +46,7 @@ import {
   metricValue,
 } from '../api/viewModels'
 import type { PageId } from '../components/layout/Sidebar'
+import { buildDecisionBrief, type DecisionPriority } from './dashboardDecisionBrief'
 
 const displayName = (name: string) => name === 'FBX_GLOBAL' ? 'FBX' : name === 'WCI_GLOBAL' ? 'WCI' : name
 const apiName = (label: string) => label === 'FBX' ? 'FBX_GLOBAL' : label === 'WCI' ? 'WCI_GLOBAL' : label
@@ -174,7 +177,7 @@ const ForecastCard: React.FC<{ name: string; forecast?: ForecastResponse; isLoad
         action={score == null ? <Badge variant="default">Score n/a</Badge> : <Badge variant={reliabilityTone(score)}>Score {score.toFixed(1)}</Badge>}
       />
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-        <Badge variant={delta == null ? 'default' : delta >= 0 ? 'warning' : 'success'}>{delta == null ? 'Direction n/a' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} move`}</Badge>
+        <Badge variant={delta == null ? 'default' : delta >= 0 ? 'warning' : 'success'}>{delta == null ? 'Direction n/a' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} pts`}</Badge>
         {mape != null && (
           <span title={`Model: ${forecast?.model_name ?? 'moving_average_baseline'} · MAE ${mae?.toFixed(1) ?? 'n/a'} · RMSE ${rmse?.toFixed(1) ?? 'n/a'}`}>
             <Badge variant={mape <= 15 ? 'success' : mape <= 30 ? 'warning' : 'danger'}>MAPE {mape.toFixed(1)}% error</Badge>
@@ -239,6 +242,7 @@ const riskFromStats = (stats: OverviewStats | null, highAnomalies: number) => {
 
 const riskTone = (severity?: string) => severity === 'high' ? 'danger' : severity === 'medium' ? 'warning' : 'success'
 const riskScore = (row?: RiskScoreResponse) => row ? Math.round(row.score) : 0
+const decisionPriorityTone = (priority: DecisionPriority) => priority === 'urgent' ? 'danger' : priority === 'watch' ? 'warning' : 'info'
 const forecastDirection = (forecast?: EntityRiskForecastResponse) => {
   const scores = (forecast?.predictions ?? [])
     .map(point => Number(point.risk_score ?? NaN))
@@ -258,6 +262,9 @@ const demoDashboardRiskRows = (): RiskScoreResponse[] => {
 
 export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNavigate }) => {
   const [showTour, setShowTour] = useState(() => localStorage.getItem('gsw-onboarding-seen') !== '1')
+  const [deepInsight, setDeepInsight] = useState<DeepInsightResponse | null>(null)
+  const [deepInsightError, setDeepInsightError] = useState<string | null>(null)
+  const [deepInsightLoading, setDeepInsightLoading] = useState(false)
 
   const statsQuery = useQuery({
     queryKey: queryKeys.overview,
@@ -368,9 +375,22 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
   const freshSources = freshnessRows.filter(row => row.freshness_status === 'fresh').length
 
   const topPortDetail = useMemo(() => {
-    const reasons = topPort?.reasons?.slice(0, 2).join('; ')
+    let reasons = topPort?.reasons?.slice(0, 2).join('; ')
+    if (reasons) {
+      reasons = reasons.replace(/No PortWatch metrics available\.?/gi, 'Awaiting next operational metric update.')
+        .replace(/Missing PortWatch data\.?/gi, 'Awaiting next operational metric update.')
+    }
     return reasons || (topPort ? `${Math.round(topPort.score)} risk score from PortWatch risk snapshots` : 'No active PortWatch risk row')
   }, [topPort])
+
+  const sourceLabel = (source: string) => {
+    const map: Record<string, string> = {
+      'portwatch_ports': 'Port trade flow',
+      'portstraitwatch_chokepoints': 'Chokepoint traffic',
+      'openmeteo_marine': 'Marine Weather',
+    }
+    return map[source] || source
+  }
 
   const liveInsights = useMemo<FeedInsight[]>(() => (insightsQuery.data ?? []).map((insight: InsightResponse) => ({
     title: insight.title || 'Trend Signal',
@@ -410,8 +430,8 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
     },
     {
       label: 'Anomalies',
-      value: fmtNum((anomaliesQuery.data ?? []).length),
-      detail: 'anomaly rows feeding trend, risk, and timeline views',
+      value: liveStats?.high_severity_anomalies != null ? fmtNum(liveStats.high_severity_anomalies) : fmtNum(highAnomalies),
+      detail: 'high-severity anomalies in current window',
     },
     {
       label: 'Risk Rows',
@@ -429,15 +449,86 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
     .filter(insight => insight.attentionLevel === 'high' || insight.category === 'port_risk' || insight.category === 'risk_story' || insight.category === 'forecast')
     .slice(0, 3)
   const displayedTopInsights = topInsights.length ? topInsights : insights.slice(0, 3)
+  const decisionBrief = buildDecisionBrief({
+    topPort,
+    topPortDetail,
+    hasLiveRiskRows: displayedRiskPorts.length > 0,
+    highAnomalies,
+    staleSources,
+    propagationLinks: propagationRows.length,
+    riskForecastDirection,
+    topStoryNarrative: riskStoryRows[0]?.narrative ?? null,
+  })
+  const deepInsightContext = useMemo(() => ({
+    uiLanguage: 'en',
+    decisionBrief: {
+      headline: decisionBrief.headline,
+      summary: decisionBrief.summary,
+      why: decisionBrief.why,
+      actions: decisionBrief.actions,
+      mode: decisionBrief.mode,
+    },
+    topPort,
+    topStoryNarrative: riskStoryRows[0]?.narrative ?? null,
+    forecast: {
+      direction: riskForecastDirection,
+      confidence: riskForecast?.confidence ?? null,
+      status: riskForecast?.data_sufficiency_status ?? null,
+      unavailableReason: riskForecast?.unavailable_reason ?? null,
+    },
+    sourceHealth: {
+      staleSources,
+      freshSources,
+      totalSources: freshnessRows.length,
+    },
+    propagationLinks: propagationRows.length,
+    highAnomalies,
+    topInsights: displayedTopInsights.slice(0, 3).map(insight => ({
+      title: insight.title,
+      text: insight.text,
+      category: insight.category,
+      confidence: insight.confidence ?? null,
+      attentionLevel: insight.attentionLevel ?? null,
+    })),
+  }), [
+    decisionBrief,
+    topPort,
+    riskStoryRows,
+    riskForecastDirection,
+    riskForecast,
+    staleSources,
+    freshSources,
+    freshnessRows.length,
+    propagationRows.length,
+    highAnomalies,
+    displayedTopInsights,
+  ])
 
   const dismissTour = () => {
     localStorage.setItem('gsw-onboarding-seen', '1')
     setShowTour(false)
   }
 
+  const requestDeepInsight = async () => {
+    if (deepInsightLoading) return
+    setDeepInsightLoading(true)
+    setDeepInsightError(null)
+    try {
+      const result = await apiClient.deepInsight({
+        page: 'dashboard',
+        context: deepInsightContext,
+      })
+      setDeepInsight(result)
+    } catch (error) {
+      setDeepInsightError(isApiError(error) ? error.detail : error instanceof Error ? error.message : 'Gemini insight unavailable')
+    } finally {
+      setDeepInsightLoading(false)
+    }
+  }
+
   return (
     <PageShell>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 64 }}>
         {showTour && (
           <Card style={{ padding: 14, borderColor: 'var(--accent)', background: 'var(--accent-muted)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -463,37 +554,98 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
         {apiError && <ErrorPanel error={apiError} title="Some dashboard APIs are unavailable" compact />}
 
         <Card style={{ padding: 16, borderColor: topPort?.severity === 'high' ? 'var(--danger)' : topPort?.severity === 'medium' ? 'var(--warning)' : 'var(--border-default)' }}>
-          <div className="overview-summary">
-            <div>
-              <div className="overview-summary__eyebrow">Executive Summary</div>
-              <div className="overview-summary__title">
-                {topPort
-                  ? `${topPort.entity_name} is the active supply-chain watchpoint.`
-                  : summaryUnavailable
-                    ? 'Global supply-chain risk is unavailable.'
-                    : risk.label}
-              </div>
-              <div className="overview-summary__detail">
-                {topPort
-                  ? `${Math.round(topPort.score)}/100 PortWatch risk. ${topPortDetail}`
-                  : summaryUnavailable
-                    ? 'Run collectors and risk scoring to populate overview signals.'
-                    : risk.detail}
-              </div>
-            </div>
-            <div className="overview-summary__actions">
+          <div className="decision-brief">
+            <div className="decision-brief__main">
+              <div className="overview-summary__eyebrow">Decision Brief</div>
+              <div className="overview-summary__title">{decisionBrief.headline}</div>
+              <div className="overview-summary__detail">{decisionBrief.summary}</div>
               <DataProvenance
-                mode={derivedRiskLive ? 'live' : portRiskQuery.isLoading ? 'loading' : 'empty'}
+                mode={portRiskQuery.isLoading ? 'loading' : decisionBrief.mode}
                 source="Dashboard live synthesis"
                 timestamp={liveStats ? `Updated ${relativeTime(liveStats.generated_at)}` : undefined}
                 stale={stale}
               />
-              <button onClick={() => onNavigate?.('ports')} className="app-button">
-                <Icons.ArrowUpRight size={14} /> Inspect Port
+              <button
+                className="app-button"
+                type="button"
+                onClick={() => void requestDeepInsight()}
+                disabled={deepInsightLoading}
+                style={{ marginTop: 12 }}
+              >
+                <Icons.MessageCircle size={14} />
+                {deepInsightLoading ? 'Gemini is analyzing...' : 'Ask Gemini for deeper insight'}
               </button>
+            </div>
+            <div className="decision-brief__why">
+              <div className="overview-summary__eyebrow">Why it matters</div>
+              {decisionBrief.why.map(reason => (
+                <div key={reason} className="decision-brief__why-row">
+                  <Icons.Info size={13} />
+                  <span>{reason}</span>
+                </div>
+              ))}
+            </div>
+            <div className="decision-brief__actions">
+              <div className="overview-summary__eyebrow">Next actions</div>
+              {decisionBrief.actions.map(action => (
+                <button
+                  key={action.label}
+                  type="button"
+                  className="decision-action"
+                  onClick={() => action.target && onNavigate?.(action.target)}
+                  disabled={!action.target}
+                  title={action.detail}
+                >
+                  <span>
+                    <Badge variant={decisionPriorityTone(action.priority)}>{action.priority}</Badge>
+                    <b>{action.label}</b>
+                  </span>
+                  <small>{action.detail}</small>
+                </button>
+              ))}
             </div>
           </div>
         </Card>
+
+        {(deepInsightLoading || deepInsightError || deepInsight) && (
+          <Card style={{ padding: 16 }}>
+            <SectionHeader
+              title="Gemini Deep Insight"
+              sub="Supplemental analyst view generated from the current dashboard context."
+              action={deepInsight?.model ? <Badge variant="info">{deepInsight.model}</Badge> : undefined}
+            />
+            {deepInsightLoading && <SkeletonBlock height={118} lines={4} />}
+            {!deepInsightLoading && deepInsightError && (
+              <ErrorPanel error={new Error(deepInsightError)} title="Gemini insight unavailable" compact />
+            )}
+            {!deepInsightLoading && deepInsight && (
+              <div className="deep-insight-panel">
+                <div className="deep-insight-grid">
+                  <div className="deep-insight-block">
+                    <span>Signal</span>
+                    <p>{deepInsight.signal}</p>
+                  </div>
+                  <div className="deep-insight-block">
+                    <span>So what</span>
+                    <p>{deepInsight.so_what}</p>
+                  </div>
+                  <div className="deep-insight-block">
+                    <span>Next steps</span>
+                    <ul>
+                      {deepInsight.next_steps.map(step => <li key={step}>{step}</li>)}
+                    </ul>
+                  </div>
+                  <div className="deep-insight-block">
+                    <span>Caveats</span>
+                    <ul>
+                      {deepInsight.caveats.map(caveat => <li key={caveat}>{caveat}</li>)}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
 
         <div className="evidence-strip">
           {evidenceCards.map(card => (
@@ -528,7 +680,7 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
           <SectionHeader
             title="Executive Brief"
             sub="Now, why, and next from PortWatch risk, forecast, and source rows."
-            action={<DataProvenance mode={derivedRiskLive ? 'live' : portRiskQuery.isLoading ? 'loading' : 'empty'} source="Dashboard live synthesis" />}
+            action={<DataProvenance mode={derivedRiskLive ? 'live' : portRiskQuery.isLoading ? 'loading' : 'empty'} source="Dashboard live synthesis" stale={stale} />}
           />
           <div className="overview-timeline">
             <div className="overview-timeline__item">
@@ -561,12 +713,12 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
             <SectionHeader
               title="Risk Source Coverage"
               sub={freshnessRows.length ? `${freshSources}/${freshnessRows.length} sources fresh` : 'No freshness rows yet'}
-              action={<DataProvenance mode={freshnessRows.length ? 'live' : freshnessQuery.isLoading ? 'loading' : 'empty'} source="PortWatch source freshness" />}
+              action={<DataProvenance mode={freshnessRows.length ? 'live' : freshnessQuery.isLoading ? 'loading' : 'empty'} source="PortWatch source freshness" stale={staleSources > 0} />}
             />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {freshnessRows.slice(0, 6).map(row => (
                 <div key={row.source} className="row-compact">
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>{row.source}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{sourceLabel(row.source)}</span>
                   <Badge variant={row.freshness_status === 'fresh' ? 'success' : row.freshness_status === 'stale' ? 'danger' : 'warning'}>{row.freshness_status}</Badge>
                   <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row.rows} rows · {row.latest_observed_at ? relativeTime(row.latest_observed_at) : 'no observation'}</span>
                 </div>
@@ -595,8 +747,8 @@ export const Dashboard: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ o
             <SectionHeader title="Market Pulse" sub="Freight index direction without duplicate system-health signals" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[
-                { label: 'BDI (Raw Materials) Trend', value: bdiChange == null ? 'No live trend' : fmtPct(bdiChange), tone: bdiChange != null && bdiChange > 0 ? 'var(--success)' : 'var(--danger)' },
-                { label: 'FBX (Containers) Trend', value: fbxChange == null ? 'No live trend' : fmtPct(fbxChange), tone: fbxChange != null && fbxChange > 0 ? 'var(--warning)' : 'var(--success)' },
+                { label: 'BDI (Raw Materials) 180d Trend', value: bdiChange == null ? 'No live trend' : fmtPct(bdiChange), tone: bdiChange != null && bdiChange > 0 ? 'var(--success)' : 'var(--danger)' },
+                { label: 'FBX (Containers) 180d Trend', value: fbxChange == null ? 'No live trend' : fmtPct(fbxChange), tone: fbxChange != null && fbxChange > 0 ? 'var(--warning)' : 'var(--success)' },
                 { label: 'Supported Indexes', value: supportedNames.length ? supportedNames.map(displayName).join(' / ') : 'No live indexes', tone: supportedNames.length >= 2 ? 'var(--success)' : 'var(--warning)' },
                 { label: 'Correlation Window', value: supportedNames.length >= 2 ? '180 days' : 'Waiting for overlap', tone: supportedNames.length >= 2 ? 'var(--info)' : 'var(--text-muted)' },
               ].map(row => (

@@ -288,6 +288,107 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   justify-items: end;
   gap: 10px;
 }
+.decision-brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.9fr) minmax(240px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+.decision-brief__main,
+.decision-brief__why,
+.decision-brief__actions {
+  min-width: 0;
+}
+.decision-brief__why,
+.decision-brief__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.decision-brief__why-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.decision-brief__why-row svg {
+  margin-top: 2px;
+  color: var(--accent);
+}
+.decision-action {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.decision-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.decision-action:disabled {
+  cursor: default;
+}
+.decision-action span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.decision-action b {
+  font-size: 12px;
+  font-weight: 650;
+}
+.decision-action small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.deep-insight-panel {
+  margin-top: 12px;
+}
+.deep-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.deep-insight-block {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+.deep-insight-block span {
+  display: block;
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.deep-insight-block p,
+.deep-insight-block ul {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.deep-insight-block ul {
+  padding-left: 18px;
+}
+.deep-insight-block li + li {
+  margin-top: 5px;
+}
 .overview-timeline {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -820,6 +921,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .grid-feed,
   .evidence-strip,
   .overview-summary,
+  .decision-brief,
+  .deep-insight-grid,
   .overview-timeline,
   .method-strip,
   .analytics-kpi-grid {

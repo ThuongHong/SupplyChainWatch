@@ -99,7 +99,6 @@ class PortComparisonItem(BaseModel):
     value: float
 
 
-
 class PortPressureItem(BaseModel):
     entity_id: str
     entity_name: str
@@ -376,6 +375,21 @@ class ChatAssistantRequest(BaseModel):
 
 class ChatAssistantResponse(BaseModel):
     answer: str
+    model: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class DeepInsightRequest(BaseModel):
+    page: str
+    context: dict[str, Any]
+
+
+class DeepInsightResponse(BaseModel):
+    signal: str
+    so_what: str
+    next_steps: list[str]
+    caveats: list[str]
     model: str
     input_tokens: int | None = None
     output_tokens: int | None = None

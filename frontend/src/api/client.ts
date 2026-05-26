@@ -161,7 +161,6 @@ export interface PortComparisonItem {
   value: number;
 }
 
-
 export interface PortPressureItem {
   entity_id: string;
   entity_name: string;
@@ -425,6 +424,21 @@ export interface ChatAssistantResponse {
   output_tokens?: number | null;
 }
 
+export interface DeepInsightRequest {
+  page: string;
+  context: Record<string, unknown>;
+}
+
+export interface DeepInsightResponse {
+  signal: string;
+  so_what: string;
+  next_steps: string[];
+  caveats: string[];
+  model: string;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+}
+
 export interface CorrelationCell {
   index_a: string;
   index_b: string;
@@ -513,6 +527,13 @@ export const apiClient = {
     }),
   chatAssistant: (body: ChatAssistantRequest, init?: RequestInit) =>
     request<ChatAssistantResponse>("/api/chat/assistant", {
+      ...init,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...init?.headers },
+      body: JSON.stringify(body),
+    }),
+  deepInsight: (body: DeepInsightRequest, init?: RequestInit) =>
+    request<DeepInsightResponse>("/api/chat/deep-insight", {
       ...init,
       method: "POST",
       headers: { "Content-Type": "application/json", ...init?.headers },

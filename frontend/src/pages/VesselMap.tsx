@@ -17,7 +17,7 @@ import {
   type VesselWatchlistResponse,
 } from '../api/client'
 import { queryKeys } from '../api/queries'
-import { latestOperationalPortAnomalyById } from '../api/viewModels'
+import { latestOperationalPortAnomalyById, relativeTime } from '../api/viewModels'
 import { EmptyState, ErrorPanel } from '../components/DataState'
 
 // ---- Vessel types ----
@@ -464,6 +464,35 @@ const VesselDrawer: React.FC<{
             </div>
           ))}
         </div>
+        {(() => {
+          const registry = (detail?.vessel ?? null) as Record<string, unknown> | null
+          if (!registry) return null
+          const typeLabel = typeof registry.type_label === 'string' ? registry.type_label : null
+          const length = typeof registry.length === 'number' ? `${registry.length.toFixed(1)} m` : null
+          const width = typeof registry.width === 'number' ? `${registry.width.toFixed(1)} m` : null
+          const dwt = typeof registry.dwt === 'number' ? `${registry.dwt.toLocaleString()} t` : null
+          const lastSeen = typeof registry.last_seen === 'string' ? relativeTime(registry.last_seen) : null
+          const rows: [string, string][] = []
+          if (typeLabel) rows.push(['Type Label', typeLabel])
+          if (length) rows.push(['Length', length])
+          if (width) rows.push(['Beam', width])
+          if (dwt) rows.push(['DWT', dwt])
+          if (lastSeen) rows.push(['Last Seen', lastSeen])
+          if (rows.length === 0) return null
+          return (
+            <div style={{ marginBottom: 16, padding: 12, borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, letterSpacing: '0.04em' }}>REGISTRY</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 12 }}>
+                {rows.map(([label, val]) => (
+                  <div key={label}>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 11, marginBottom: 2 }}>{label}</div>
+                    <div className="mono-num" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>7-Day Track</div>
         <div style={{ background: '#060B16', borderRadius: 6, padding: 8 }}>
           {loading ? <div style={{ height: 90, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading track...</div> : trackPts.length > 1 ? <svg width="100%" viewBox="0 0 250 90" style={{ display: 'block' }}>

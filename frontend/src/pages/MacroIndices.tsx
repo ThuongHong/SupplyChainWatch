@@ -168,13 +168,13 @@ const MacroChart: React.FC<ChartProps> = ({ indices, activeNames, histories, per
           </React.Fragment>
         )
       })}
-      {series.map(({ ix, points, values }) => {
+      {series.map(({ ix, points, values }, seriesIndex) => {
         const path = values.map((value, i) => `${i === 0 ? 'M' : 'L'}${toX(i, values.length).toFixed(1)},${toY(value).toFixed(1)}`).join(' ')
         const step = Math.max(1, Math.ceil(points.length / 7))
         return (
           <g key={ix.index_name}>
             <path d={path} fill="none" stroke={ix.color} strokeWidth="1.9" strokeLinejoin="round" />
-            {points.map((point, i) => (i % step === 0 || i === points.length - 1) ? (
+            {seriesIndex === 0 && points.map((point, i) => (i % step === 0 || i === points.length - 1) ? (
               <text key={`${ix.index_name}-${point.time}`} x={toX(i, points.length)} y={H - 5} textAnchor="middle" style={{ fontSize: 9, fill: 'var(--text-muted)' }}>
                 {new Date(point.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
               </text>

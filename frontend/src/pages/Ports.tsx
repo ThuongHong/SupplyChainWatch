@@ -135,18 +135,25 @@ const PortCard: React.FC<{ port: PortViewModel; demo: boolean; onClick: () => vo
         <div>
           <div className="mono-num" style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>{displayCount}</div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{displaySource}</div>
-          <div style={{ marginTop: 6, display: 'flex', gap: 12 }}>
+          <div style={{ marginTop: 6, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <div>
               <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row?.anchored_count ?? 0}</div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>anchored</div>
             </div>
-            {pwPortcalls != null && (
+            <div>
+              <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row?.moored_count ?? 0}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>moored</div>
+            </div>
+            <div>
+              <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row?.underway_count ?? 0}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>underway</div>
+            </div>
+            {pwPortcalls != null ? (
               <div>
                 <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{pwPortcalls}</div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>portcalls/wk</div>
               </div>
-            )}
-            {pwPortcalls == null && (
+            ) : (
               <div>
                 <div className="mono-num" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{row?.avg_dwell_hours?.toFixed(1) ?? 'n/a'}h</div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>dwell</div>
@@ -494,7 +501,6 @@ const PortDetail: React.FC<{
   )
 }
 
-
 function switchBadgeVariant(rec?: SwitchRecommendationResponse): 'danger' | 'warning' | 'success' {
   const z = Math.abs(rec?.source.z_score_30d ?? 0)
   if (z >= 3) return 'danger'
@@ -682,8 +688,6 @@ export const Ports: React.FC<{ onNavigate?: (page: PageId) => void }> = ({ onNav
           <MetricCard label="Watchlist Ports" value={medCount} tone={medCount ? 'warning' : 'success'} />
           <MetricCard label="Vessels In Areas" value={fmtNum(totalVessels)} tone="info" />
         </div>
-
-
 
         {!usingDemo && topSwitchPorts.length > 0 && (
           <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

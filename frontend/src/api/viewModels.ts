@@ -1,5 +1,7 @@
 import type {
   AnomalyResponse,
+  ChokepointResponse,
+  ChokepointTimelinePoint,
   ForecastPoint,
   ForecastResponse,
   IndexPoint,
@@ -166,6 +168,34 @@ export function buildPortViewModels(
     (b.congestion?.total_in_area ?? 0) - (a.congestion?.total_in_area ?? 0) ||
     (b.twenty_ft_eq_units_year ?? 0) - (a.twenty_ft_eq_units_year ?? 0)
   )
+}
+
+export function chokepointSeverity(
+  row?: Pick<ChokepointResponse, 'risk_score'> | Pick<ChokepointTimelinePoint, 'risk_score'> | null,
+): Severity {
+  const risk = row?.risk_score ?? 0
+  if (risk >= 0.66) return 'high'
+  if (risk >= 0.33) return 'medium'
+  return 'low'
+}
+
+export interface ChokepointViewModel extends ChokepointResponse {
+  severity: Severity
+  stale: boolean
+}
+
+export function buildChokepointViewModels(rows: ChokepointResponse[]): ChokepointViewModel[] {
+  return rows
+    .map(row => ({
+      ...row,
+      severity: chokepointSeverity(row),
+      stale: row.time ? isStale(row.time, 12) : false,
+    }))
+    .sort((a, b) =>
+      severityScore(b.severity) - severityScore(a.severity) ||
+      (b.risk_score ?? 0) - (a.risk_score ?? 0) ||
+      (b.vessel_count ?? 0) - (a.vessel_count ?? 0),
+    )
 }
 
 export function activeHighAnomalies(anomalies: AnomalyResponse[]): number {
